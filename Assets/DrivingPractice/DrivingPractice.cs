@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using Random = UnityEngine.Random;
 using UnityEngine;
@@ -13,6 +14,9 @@ namespace BCRoot
 
         const float SectionLength = 160f;
         const float Conflict = 87f;
+        const float EmergencyOffset = 30f;
+        const float EmergencyStopLine = 84f + EmergencyOffset;
+        const float CrossTrafficDuration = 6f;
         const float Lane = 1.85f;
         const float Nose = 2.66f;
         const int RoundLength = 5;
@@ -22,6 +26,8 @@ namespace BCRoot
             "Expressway", "Flashing red", "Emergency vehicle", "School bus"
         };
 
+        [SerializeField] bool useAuthoredScenario;
+        [SerializeField] Section authoredScenario;
         [SerializeField] Transform vehicle;
         [SerializeField] Transform driverView;
         [SerializeField] TextMesh display;
@@ -34,23 +40,35 @@ namespace BCRoot
         MeshRenderer schoolBuilding;
         readonly List<Material> materials = new();
         GameObject route;
-        Material asphalt, paint, grass, sidewalk, leaves, bark, red, amber;
+        Bounds playerCarBounds;
+        Material asphalt, paint, grass, sidewalk, leaves, bark, red, amber, darkRedLens;
         AudioSource speaker;
         AudioClip prompt, siren;
         int sectionIndex, gear;
         float speed, distance, hazardTime, overspeedTime, closeTime, stoppedTime, leadPosition, leadSpeed;
         bool prompted, checkedLeft, checkedRight, stopped, leftHeld, rightHeld, finished;
         string result;
+        bool completedSessionScenario;
         Vector3 seatedHead;
         Quaternion seatedHeading;
         float yaw, pitch;
         bool usingHeadset;
 
+        [Serializable]
         sealed class Section
         {
             public Scenario Kind;
             public Transform Actor;
+            public Transform ParkedCar;
+            public Transform TrafficSignal;
+            public Transform StopLine;
+            [NonSerialized] public Bounds ParkedCarBounds;
+            [NonSerialized] public Vector3 ActorStart, ChildStart, BallStart;
             public GameObject Signal;
+            [NonSerialized] public MeshRenderer RedLensRenderer;
+            [NonSerialized] public Material[] RedLensOn;
+            [NonSerialized] public Material[] RedLensOff;
+            [NonSerialized] public bool RedLensLit;
             public GameObject BrakeLights;
             public GameObject CrossingChild;
             public GameObject StopArm;
@@ -60,6 +78,26 @@ namespace BCRoot
 
         void Awake()
         {
+            if (!useAuthoredScenario)
+            {
+                CreateSurfaces();
+                IndexCityBuildings();
+            }
+            else
+            {
+                red = Surface(new Color(1f, .025f, .01f), true);
+                InitializeSection(authoredScenario);
+            }
+            speaker = gameObject.AddComponent<AudioSource>();
+            speaker.playOnAwake = false;
+            prompt = Tone("Approach cue", .25f, false);
+            siren = Tone("Emergency siren", 1.4f, true);
+            playerCarBounds = CarBoundsRelativeTo(vehicle);
+            StartRound();
+        }
+
+        void CreateSurfaces()
+        {
             asphalt = Surface(new Color(.12f, .15f, .17f));
             paint = Surface(new Color(.94f, .93f, .85f));
             grass = Surface(new Color(.26f, .43f, .26f));
@@ -68,10 +106,10 @@ namespace BCRoot
             bark = Surface(new Color(.27f, .19f, .12f));
             red = Surface(new Color(1f, .025f, .01f), true);
             amber = Surface(new Color(1f, .68f, .09f), true);
-            speaker = gameObject.AddComponent<AudioSource>();
-            speaker.playOnAwake = false;
-            prompt = Tone("Approach cue", .25f, false);
-            siren = Tone("Emergency siren", 1.4f, true);
+        }
+
+        void IndexCityBuildings()
+        {
             foreach (var renderer in city.GetComponentsInChildren<MeshRenderer>())
             {
                 if (!renderer.name.StartsWith("building-", StringComparison.Ordinal) ||
@@ -80,7 +118,15 @@ namespace BCRoot
                 cityBuildings.Add(renderer);
                 if (renderer.name == "building-e") schoolBuilding = renderer;
             }
-            StartRound();
+        }
+
+        void InitializeSection(Section section)
+        {
+            if (section.Actor) section.ActorStart = section.Actor.localPosition;
+            if (section.CrossingChild) section.ChildStart = section.CrossingChild.transform.localPosition;
+            if (section.Ball) section.BallStart = section.Ball.transform.localPosition;
+            if (section.ParkedCar) section.ParkedCarBounds = CarBoundsRelativeTo(section.ParkedCar);
+            if (section.TrafficSignal) ConfigureFlashingLens(section, section.TrafficSignal);
         }
 
         void Update()
@@ -96,7 +142,15 @@ namespace BCRoot
 
             if (result != null)
             {
-                if (upshift && !right) StartRound();
+                if (upshift && !right)
+                {
+                    if (!completedSessionScenario) StartRound();
+                    else if (!ScenarioLauncher.HasRemaining)
+                    {
+                        enabled = false;
+                        ScenarioLauncher.RestartSession();
+                    }
+                }
                 else ShowResult();
                 return;
             }
@@ -129,12 +183,13 @@ namespace BCRoot
             var section = course[sectionIndex];
             var kind = section.Kind;
             var local = distance - sectionIndex * SectionLength;
-            if (!prompted && local >= 43f)
+            if (!prompted && local >= 43f + (kind == Scenario.Ambulance ? EmergencyOffset : 0f))
             {
                 prompted = true;
                 section.Cue.SetActive(true);
                 if (kind == Scenario.Ambulance)
                 {
+                    section.Actor.gameObject.SetActive(true);
                     speaker.clip = siren;
                     speaker.loop = true;
                     speaker.Play();
@@ -142,14 +197,22 @@ namespace BCRoot
                 else speaker.PlayOneShot(prompt, .35f);
             }
 
+            var previousPosition = vehicle.position;
             speed = Mathf.MoveTowards(speed, Speeds[gear], 20f * dt);
             distance += speed / 3.6f * dt;
             local = distance - sectionIndex * SectionLength;
             var front = local + Nose;
             var emergency = kind == Scenario.Ambulance;
-            var pullOver = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(54f, 74f, local)) *
-                (1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(90f, 115f, local)));
+            var emergencyLocal = local - EmergencyOffset;
+            var pullOver = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(54f, 74f, emergencyLocal)) *
+                (1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(90f, 115f, emergencyLocal)));
             vehicle.position = new Vector3(Lane + (emergency ? pullOver * 2.55f : 0f), 0f, distance);
+
+            if (section.ParkedCar && HitParkedCar(section, previousPosition))
+            {
+                End("Hit the parked car.");
+                return;
+            }
 
             var limitZone = kind == Scenario.SchoolZone || kind == Scenario.Playground;
             if (limitZone && front >= 75f && local < 128f)
@@ -162,7 +225,7 @@ namespace BCRoot
             {
                 leadSpeed = Mathf.MoveTowards(leadSpeed, front >= 77f ? 50f : 80f, 22f * dt);
                 leadPosition += leadSpeed / 3.6f * dt;
-                section.Actor.localPosition = new Vector3(Lane, 0f, leadPosition);
+                section.Actor.localPosition = new Vector3(section.ActorStart.x, section.ActorStart.y, leadPosition);
                 section.BrakeLights.SetActive(front >= 77f && leadSpeed > 50.05f);
                 var gap = leadPosition - 2f - front;
                 closeTime = gap < speed / 3.6f * 1.25f ? closeTime + dt : 0f;
@@ -176,10 +239,10 @@ namespace BCRoot
 
             if (local < SectionLength || result != null) return;
             sectionIndex++;
-            if (sectionIndex == RoundLength)
+            if (sectionIndex == course.Count)
             {
                 finished = true;
-                End("You cleared all five scenarios.");
+                End(useAuthoredScenario ? "You cleared this scenario." : "You cleared all five scenarios.");
                 return;
             }
             ResetSection();
@@ -191,38 +254,43 @@ namespace BCRoot
             var intersection = kind == Scenario.StopSign || kind == Scenario.FlashingRed;
             var emergency = kind == Scenario.Ambulance;
             var bus = kind == Scenario.SchoolBus;
-            var stopLine = emergency ? 84f : Conflict;
-            var trigger = bus ? 45f : emergency ? 62f : intersection ? 67f : 70f;
+            var stopLine = StopLinePosition(section);
+            var trigger = bus ? 45f : emergency ? 62f + EmergencyOffset : intersection ? 67f : 70f;
             if (front >= trigger) hazardTime += dt;
-            var clearAfter = intersection ? 6f : bus ? 8f : emergency ? 6.7f : 4.8f;
+            var clearAfter = intersection ? CrossTrafficDuration : bus ? 8f : emergency ? 6.7f : 4.8f;
             var clear = hazardTime >= clearAfter;
 
+            var flashOn = Mathf.Repeat(Time.time, .85f) < .43f;
+            if (section.RedLensRenderer && section.RedLensLit != flashOn)
+            {
+                section.RedLensLit = flashOn;
+                section.RedLensRenderer.sharedMaterials = flashOn ? section.RedLensOn : section.RedLensOff;
+            }
             if (section.Signal)
-                section.Signal.SetActive((kind == Scenario.FlashingRed || hazardTime < clearAfter && hazardTime >= 1.4f)
-                    && Mathf.Repeat(Time.time, .85f) < .43f);
+                section.Signal.SetActive(!clear && hazardTime >= 1.4f && flashOn);
             var actor = section.Actor;
             if (intersection)
             {
-                actor.localPosition = new Vector3(Mathf.Lerp(-18f, 18f, Mathf.InverseLerp(1.5f, clearAfter, hazardTime)), 0f, Conflict + 6f);
+                actor.localPosition = section.ActorStart + Vector3.right * Mathf.Lerp(0f, 36f, Mathf.InverseLerp(1.5f, clearAfter, hazardTime));
             }
             else if (emergency)
             {
-                actor.localPosition = new Vector3(Lane, 0f, Mathf.Lerp(15f, 142f, Mathf.Clamp01(hazardTime / clearAfter)));
+                actor.localPosition = section.ActorStart + Vector3.forward * Mathf.Lerp(0f, 110f, Mathf.Clamp01(hazardTime / clearAfter));
                 speaker.volume = clear ? 0f : Mathf.Lerp(.08f, .4f, Mathf.Clamp01(hazardTime / 4f));
             }
             else if (bus)
             {
                 section.StopArm.SetActive(hazardTime >= 1.4f && !clear);
-                actor.localPosition = new Vector3(-Lane, 0f, Mathf.Lerp(132f, Conflict + 9f, Mathf.Clamp01(hazardTime / 1.4f)));
-                section.CrossingChild.transform.localPosition = new Vector3(
-                    Mathf.Lerp(-5f, 6f, Mathf.InverseLerp(2.7f, clearAfter, hazardTime)), 0f, Conflict + 4f);
+                actor.localPosition = section.ActorStart + Vector3.back * Mathf.Lerp(0f, 36f, Mathf.Clamp01(hazardTime / 1.4f));
+                section.CrossingChild.transform.localPosition = section.ChildStart + Vector3.right *
+                    Mathf.Lerp(0f, 11f, Mathf.InverseLerp(2.7f, clearAfter, hazardTime));
                 section.CrossingChild.SetActive(hazardTime >= 2.7f);
             }
             else
             {
-                actor.localPosition = new Vector3(Mathf.Lerp(5.2f, -5.5f, Mathf.InverseLerp(.6f, clearAfter, hazardTime)), 0f, Conflict + 4f);
+                actor.localPosition = section.ActorStart + Vector3.left * Mathf.Lerp(0f, 10.7f, Mathf.InverseLerp(.6f, clearAfter, hazardTime));
                 if (section.Ball) section.Ball.transform.localPosition =
-                    new Vector3(Mathf.Lerp(5.4f, -5.4f, Mathf.Clamp01(hazardTime / 1.7f)), .16f, Conflict + 3f);
+                    section.BallStart + Vector3.left * Mathf.Lerp(0f, 10.8f, Mathf.Clamp01(hazardTime / 1.7f));
             }
 
             if (front >= stopLine - 24f && front <= stopLine && speed <= .1f && (!emergency || vehicle.position.x > 4f))
@@ -248,16 +316,26 @@ namespace BCRoot
         {
             if (route) Destroy(route);
             course.Clear();
-            route = new GameObject("Practice route");
-            var choices = new List<Scenario>((Scenario[])System.Enum.GetValues(typeof(Scenario)));
-            for (var i = 0; i < RoundLength; i++)
+            if (useAuthoredScenario)
             {
-                var pick = Random.Range(0, choices.Count);
-                course.Add(BuildSection(choices[pick], i));
-                choices.RemoveAt(pick);
+                course.Add(authoredScenario);
+            }
+            else
+            {
+                route = new GameObject("Practice route");
+                var choices = new List<Scenario>((Scenario[])Enum.GetValues(typeof(Scenario)));
+                for (var i = 0; i < RoundLength; i++)
+                {
+                    var pick = Random.Range(0, choices.Count);
+                    var section = BuildSection(choices[pick], i);
+                    InitializeSection(section);
+                    course.Add(section);
+                    choices.RemoveAt(pick);
+                }
             }
             result = null;
             finished = false;
+            completedSessionScenario = false;
             sectionIndex = 0;
             distance = 0;
             vehicle.position = new Vector3(Lane, 0f, 0f);
@@ -271,7 +349,20 @@ namespace BCRoot
             gear = 2;
             hazardTime = overspeedTime = closeTime = stoppedTime = 0f;
             prompted = stopped = checkedLeft = checkedRight = false;
-            leadPosition = 31f;
+            var section = course[sectionIndex];
+            if (section.Actor) section.Actor.localPosition = section.ActorStart;
+            if (section.CrossingChild)
+            {
+                section.CrossingChild.transform.localPosition = section.ChildStart;
+                section.CrossingChild.SetActive(false);
+            }
+            if (section.Ball) section.Ball.transform.localPosition = section.BallStart;
+            if (section.Signal) section.Signal.SetActive(false);
+            if (section.StopArm) section.StopArm.SetActive(false);
+            if (section.BrakeLights) section.BrakeLights.SetActive(false);
+            if (section.Kind == Scenario.Ambulance) section.Actor.gameObject.SetActive(false);
+            section.Cue.SetActive(false);
+            leadPosition = section.ActorStart.z;
             leadSpeed = 80f;
             speaker.Stop();
             speaker.loop = false;
@@ -317,11 +408,51 @@ namespace BCRoot
             result = message;
             speaker.Stop();
             speed = 0f;
+
+            completedSessionScenario = finished && useAuthoredScenario &&
+                ScenarioLauncher.TryCompleteScenario(gameObject.scene.path);
+            if (completedSessionScenario && ScenarioLauncher.HasRemaining)
+                StartCoroutine(LoadNextScenario());
         }
 
-        void ShowResult() => display.text = $"{(finished ? "ROUND COMPLETE" : "TRY AGAIN")}\n{result}\nLeft button / ← to start a new round";
-        void ShowDrive() => display.text =
-            $"{sectionIndex + 1}/{RoundLength}   {Names[(int)course[sectionIndex].Kind]}\n{Mathf.RoundToInt(speed)} km/h   ·   Target {Speeds[gear]}\nLeft / ← faster      Right / → slower";
+        IEnumerator LoadNextScenario()
+        {
+            yield return new WaitForSecondsRealtime(2f);
+            ScenarioLauncher.LoadNext();
+        }
+
+        void ShowResult()
+        {
+            if (completedSessionScenario)
+            {
+                var progress = $"{ScenarioLauncher.CompletedCount}/{ScenarioLauncher.ScenarioCount}";
+                display.text = ScenarioLauncher.HasRemaining
+                    ? $"SCENARIO CLEAR   {progress}\nLoading the next scenario…"
+                    : $"SESSION COMPLETE   {progress}\nLeft button / ← for a new session";
+                return;
+            }
+
+            var retry = useAuthoredScenario ? "retry this scenario" : "start a new round";
+            display.text = $"{(finished ? "ROUND COMPLETE" : "TRY AGAIN")}\n{result}\nLeft button / ← to {retry}";
+        }
+
+        void ShowDrive()
+        {
+            var kind = course[sectionIndex].Kind;
+            var instruction = "Left / ← faster      Right / → slower";
+            if (kind == Scenario.FlashingRed && prompted && distance - sectionIndex * SectionLength + Nose < StopLinePosition(course[sectionIndex]))
+            {
+                if (!stopped) instruction = "Flashing red: stop at the line";
+                else if (hazardTime < CrossTrafficDuration) instruction = "Wait for cross traffic";
+                else if (!checkedLeft || !checkedRight) instruction = "Check left and right";
+                else instruction = "Cross traffic clear. Proceed when safe.";
+            }
+            var progress = useAuthoredScenario && ScenarioLauncher.IsCurrentScenario(gameObject.scene.path)
+                ? $"{ScenarioLauncher.CompletedCount + 1}/{ScenarioLauncher.ScenarioCount}"
+                : $"{sectionIndex + 1}/{course.Count}";
+            display.text = $"{progress}   {Names[(int)kind]}\n" +
+                $"{Mathf.RoundToInt(speed)} km/h   ·   Target {Speeds[gear]}\n{instruction}";
+        }
 
         void OnDestroy()
         {
@@ -387,13 +518,14 @@ namespace BCRoot
                 }
             }
 
-            section.Cue = Block(root, "Approach cue", new Vector3(Lane * 2f - .16f, .015f, 58f),
+            section.Cue = Block(root, "Approach cue", new Vector3(kind == Scenario.Ambulance ? roadWidth / 2f - .16f : Lane * 2f - .16f, .015f,
+                    58f + (kind == Scenario.Ambulance ? EmergencyOffset : 0f)),
                 new Vector3(.11f, .015f, 22f), amber);
             section.Cue.SetActive(false);
 
             if (kind != Scenario.SchoolZone && kind != Scenario.Expressway)
-                Block(root, "Stop reference", new Vector3(kind == Scenario.Ambulance ? Lane + 2.55f : Lane, .02f,
-                    kind == Scenario.Ambulance ? 84f : Conflict), new Vector3(kind == Scenario.Ambulance ? 2f : 3.35f, .02f, .23f), paint);
+                section.StopLine = Block(root, "Stop reference", new Vector3(kind == Scenario.Ambulance ? Lane + 2.55f : Lane, .02f,
+                    kind == Scenario.Ambulance ? EmergencyStopLine : Conflict), new Vector3(kind == Scenario.Ambulance ? 2f : 3.35f, .02f, .23f), paint).transform;
 
             switch (kind)
             {
@@ -403,14 +535,13 @@ namespace BCRoot
                     break;
                 case Scenario.FlashingRed:
                     var signal = Place(trafficLight, root, 3.9f, Conflict + 2f, 180f);
-                    // The pole's arm reaches over the travel lane.
-                    section.Signal = Shape(root, "Flashing red lens",
-                        new Vector3(1.02f, 4.48f, Conflict + 1.55f), Vector3.one * .28f, red, PrimitiveType.Sphere);
+                    section.TrafficSignal = signal;
                     signal.name = "Flashing red signal";
                     section.Actor = Place(sedan, root, -18f, Conflict + 6f, -90f);
                     break;
                 case Scenario.HiddenCrossing:
-                    Place(sedan, root, 4.02f, Conflict + .1f, 180f);
+                    section.ParkedCar = Place(sedan, root, 4.02f, Conflict + .1f, 180f);
+                    section.ParkedCar.name = "Parked sedan";
                     section.Actor = Place(Random.value < .5f ? pedestrian : cat, root, 5.2f, Conflict + 4f, -90f);
                     break;
                 case Scenario.SchoolZone:
@@ -442,7 +573,8 @@ namespace BCRoot
                     section.BrakeLights.SetActive(false);
                     break;
                 case Scenario.Ambulance:
-                    section.Actor = Place(ambulance, root, Lane, 15f, 180f);
+                    section.Actor = Place(ambulance, root, Lane, 15f + EmergencyOffset, 180f);
+                    section.Actor.gameObject.SetActive(false);
                     section.Signal = Shape(root, "Emergency light bar", new Vector3(0f, 2.45f, 0f), new Vector3(.85f, .12f, .27f), red,
                         PrimitiveType.Cube);
                     AttachToActor(section.Signal.transform, section.Actor);
@@ -471,6 +603,55 @@ namespace BCRoot
                 section.CrossingChild.SetActive(false);
             }
             return section;
+        }
+
+        float StopLinePosition(Section section) => section.StopLine
+            ? section.StopLine.position.z - sectionIndex * SectionLength
+            : (section.Kind == Scenario.Ambulance ? EmergencyStopLine : Conflict);
+
+        bool HitParkedCar(Section section, Vector3 previousPosition)
+        {
+            // The Sedan moves directly along the route, so sweep its bounds over this step.
+            var swept = new Bounds(playerCarBounds.center + previousPosition, playerCarBounds.size);
+            swept.Encapsulate(new Bounds(playerCarBounds.center + vehicle.position, playerCarBounds.size));
+            var parked = section.ParkedCarBounds;
+            parked.center += section.ParkedCar.position;
+            return swept.Intersects(parked);
+        }
+
+        static Bounds CarBoundsRelativeTo(Transform car)
+        {
+            var bounds = new Bounds(car.position, Vector3.zero);
+            foreach (var mesh in car.GetComponentsInChildren<MeshFilter>())
+                if (mesh.TryGetComponent<MeshRenderer>(out var renderer) && renderer.enabled)
+                    bounds.Encapsulate(renderer.bounds);
+
+            bounds.center -= car.position;
+            return bounds;
+        }
+
+        void ConfigureFlashingLens(Section section, Transform signal)
+        {
+            foreach (var renderer in signal.GetComponentsInChildren<MeshRenderer>())
+            {
+                var slots = renderer.sharedMaterials;
+                var lens = Array.FindIndex(slots, material => material && material.name == "TrafficLight_VernelhoAceso");
+                if (lens < 0) continue;
+                section.RedLensRenderer = renderer;
+                section.RedLensOff = slots;
+                section.RedLensOn = (Material[])slots.Clone();
+                section.RedLensOn[lens] = red;
+
+                if (!darkRedLens)
+                {
+                    darkRedLens = new Material(slots[lens]) { color = new Color(.22f, .02f, .02f) };
+                    materials.Add(darkRedLens);
+                }
+                slots[lens] = darkRedLens;
+                renderer.sharedMaterials = slots;
+                return;
+            }
+            Debug.LogWarning("The traffic light prefab has no red lens material slot.", signal);
         }
 
         static GameObject PlaceCityBuilding(MeshRenderer source, Transform root, int side, float setback, float z)
