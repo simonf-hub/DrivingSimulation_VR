@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using Random = UnityEngine.Random;
 using UnityEngine;
@@ -12,8 +11,9 @@ namespace BCRoot
     {
         enum Scenario { StopSign, HiddenCrossing, SchoolZone, Playground, Expressway, FlashingRed, Ambulance, SchoolBus }
 
-        const float SectionLength = 160f;
+        internal const float SectionLength = 160f;
         const float Conflict = 87f;
+        const float ExpresswayBrakePoint = 77f;
         const float EmergencyOffset = 30f;
         const float EmergencyStopLine = 84f + EmergencyOffset;
         const float CrossTrafficDuration = 6f;
@@ -41,7 +41,7 @@ namespace BCRoot
         readonly List<Material> materials = new();
         GameObject route;
         Bounds playerCarBounds;
-        Material asphalt, paint, grass, sidewalk, leaves, bark, red, amber, darkRedLens;
+        Material asphalt, paint, grass, sidewalk, leaves, bark, red, amber, darkRedLens, slowdownZone;
         AudioSource speaker;
         AudioClip prompt, siren;
         int sectionIndex, gear;
@@ -49,6 +49,8 @@ namespace BCRoot
         bool prompted, checkedLeft, checkedRight, stopped, leftHeld, rightHeld, finished;
         string result;
         bool completedSessionScenario;
+        float worldStart;
+        readonly List<Light> stagedLights = new();
         Vector3 seatedHead;
         Quaternion seatedHeading;
         float yaw, pitch;
@@ -96,6 +98,88 @@ namespace BCRoot
             StartRound();
         }
 
+        void Start()
+        {
+            if (useAuthoredScenario && worldStart == 0f)
+                ScenarioLauncher.PreloadFollowing(this);
+        }
+
+        internal void StageForSession(float start)
+        {
+            worldStart = start;
+            enabled = false;
+            vehicle.gameObject.SetActive(false);
+            foreach (var root in gameObject.scene.GetRootGameObjects())
+            {
+                if (root == gameObject || root == vehicle.gameObject) continue;
+                root.transform.position += Vector3.forward * start;
+            }
+
+            SetDirectionalLights(false);
+
+            // The first scene has a lead-in behind its spawn point. Join later roads at zero.
+            foreach (Transform prop in authoredScenario.Cue.transform.parent)
+            {
+                var position = prop.localPosition;
+                if (position.z < 0f && prop.name == "Centre marking")
+                    prop.gameObject.SetActive(false);
+                if (prop.name != "Road" && prop.name != "Ground") continue;
+                var scale = prop.localScale;
+                if (position.z - scale.z / 2f >= 0f) continue;
+                scale.z = position.z + scale.z / 2f;
+                position.z = scale.z / 2f;
+                prop.localScale = scale;
+                prop.localPosition = position;
+            }
+        }
+
+        internal void LeaveSessionSection()
+        {
+            speaker.Stop();
+            enabled = false;
+            vehicle.gameObject.SetActive(false);
+            SetDirectionalLights(false);
+        }
+
+        internal void EnterSessionSection(DrivingPractice previous)
+        {
+            distance = previous.distance - SectionLength;
+            vehicle.position = previous.vehicle.position;
+            speed = previous.speed;
+            gear = previous.gear;
+            leftHeld = previous.leftHeld;
+            rightHeld = previous.rightHeld;
+            yaw = previous.yaw;
+            pitch = previous.pitch;
+            seatedHead = previous.seatedHead;
+            seatedHeading = previous.seatedHeading;
+            usingHeadset = previous.usingHeadset;
+            driverView.SetLocalPositionAndRotation(previous.driverView.localPosition, previous.driverView.localRotation);
+
+            SetDirectionalLights(true);
+            vehicle.gameObject.SetActive(true);
+            enabled = true;
+            ShowDrive();
+        }
+
+        void SetDirectionalLights(bool restore)
+        {
+            if (restore)
+            {
+                foreach (var light in stagedLights) light.enabled = true;
+                stagedLights.Clear();
+                return;
+            }
+
+            foreach (var root in gameObject.scene.GetRootGameObjects())
+            foreach (var light in root.GetComponentsInChildren<Light>())
+            {
+                if (light.type != LightType.Directional || !light.enabled) continue;
+                light.enabled = false;
+                stagedLights.Add(light);
+            }
+        }
+
         void CreateSurfaces()
         {
             asphalt = Surface(new Color(.12f, .15f, .17f));
@@ -106,6 +190,8 @@ namespace BCRoot
             bark = Surface(new Color(.27f, .19f, .12f));
             red = Surface(new Color(1f, .025f, .01f), true);
             amber = Surface(new Color(1f, .68f, .09f), true);
+            slowdownZone = new Material(Shader.Find("BCRoot/Slowdown Zone"));
+            materials.Add(slowdownZone);
         }
 
         void IndexCityBuildings()
@@ -168,12 +254,13 @@ namespace BCRoot
 
             // Limit movement per step so a slow frame cannot jump over a stop line.
             var remaining = Mathf.Min(Time.deltaTime, .1f);
-            while (remaining > 0f && result == null)
+            while (remaining > 0f && result == null && enabled)
             {
                 var step = Mathf.Min(remaining, .02f);
                 Advance(step);
                 remaining -= step;
             }
+            if (!enabled) return;
             if (result != null) ShowResult();
             else ShowDrive();
         }
@@ -186,7 +273,7 @@ namespace BCRoot
             if (!prompted && local >= 43f + (kind == Scenario.Ambulance ? EmergencyOffset : 0f))
             {
                 prompted = true;
-                section.Cue.SetActive(true);
+                if (kind != Scenario.Expressway) section.Cue.SetActive(true);
                 if (kind == Scenario.Ambulance)
                 {
                     section.Actor.gameObject.SetActive(true);
@@ -206,7 +293,7 @@ namespace BCRoot
             var emergencyLocal = local - EmergencyOffset;
             var pullOver = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(54f, 74f, emergencyLocal)) *
                 (1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(90f, 115f, emergencyLocal)));
-            vehicle.position = new Vector3(Lane + (emergency ? pullOver * 2.55f : 0f), 0f, distance);
+            vehicle.position = new Vector3(Lane + (emergency ? pullOver * 2.55f : 0f), 0f, worldStart + distance);
 
             if (section.ParkedCar && HitParkedCar(section, previousPosition))
             {
@@ -223,10 +310,13 @@ namespace BCRoot
 
             if (kind == Scenario.Expressway)
             {
-                leadSpeed = Mathf.MoveTowards(leadSpeed, front >= 77f ? 50f : 80f, 22f * dt);
+                leadSpeed = Mathf.MoveTowards(leadSpeed, front >= ExpresswayBrakePoint ? 50f : 80f, 22f * dt);
                 leadPosition += leadSpeed / 3.6f * dt;
                 section.Actor.localPosition = new Vector3(section.ActorStart.x, section.ActorStart.y, leadPosition);
-                section.BrakeLights.SetActive(front >= 77f && leadSpeed > 50.05f);
+                section.BrakeLights.SetActive(front >= ExpresswayBrakePoint && leadSpeed > 50.05f);
+                var showSlowdown = front >= ExpresswayBrakePoint && vehicle.position.z <= section.Cue.GetComponent<Renderer>().bounds.max.z &&
+                    (speed > 50.1f || Speeds[gear] > 50);
+                if (section.Cue.activeSelf != showSlowdown) section.Cue.SetActive(showSlowdown);
                 var gap = leadPosition - 2f - front;
                 closeTime = gap < speed / 3.6f * 1.25f ? closeTime + dt : 0f;
                 if (gap <= 0f) { End("Rear-ended the lead vehicle."); return; }
@@ -237,7 +327,20 @@ namespace BCRoot
                 HandleStop(section, front, dt);
             }
 
+            if (section.Cue.activeSelf && vehicle.position.z > section.Cue.GetComponent<Renderer>().bounds.max.z)
+                section.Cue.SetActive(false);
+
             if (local < SectionLength || result != null) return;
+            ClearScenarioProps(section);
+            if (useAuthoredScenario && ScenarioLauncher.HasFollowingScenario(gameObject.scene.path))
+            {
+                if (!ScenarioLauncher.TryAdvance(this))
+                {
+                    distance = SectionLength;
+                    vehicle.position = new Vector3(Lane, 0f, worldStart + distance);
+                }
+                return;
+            }
             sectionIndex++;
             if (sectionIndex == course.Count)
             {
@@ -260,7 +363,7 @@ namespace BCRoot
             var clearAfter = intersection ? CrossTrafficDuration : bus ? 8f : emergency ? 6.7f : 4.8f;
             var clear = hazardTime >= clearAfter;
 
-            var flashOn = Mathf.Repeat(Time.time, .85f) < .43f;
+            var flashOn = (!intersection || front < stopLine + 12f) && Mathf.Repeat(Time.time, .85f) < .43f;
             if (section.RedLensRenderer && section.RedLensLit != flashOn)
             {
                 section.RedLensLit = flashOn;
@@ -284,13 +387,23 @@ namespace BCRoot
                 actor.localPosition = section.ActorStart + Vector3.back * Mathf.Lerp(0f, 36f, Mathf.Clamp01(hazardTime / 1.4f));
                 section.CrossingChild.transform.localPosition = section.ChildStart + Vector3.right *
                     Mathf.Lerp(0f, 11f, Mathf.InverseLerp(2.7f, clearAfter, hazardTime));
-                section.CrossingChild.SetActive(hazardTime >= 2.7f);
+                section.CrossingChild.SetActive(!clear && hazardTime >= 2.7f);
             }
             else
             {
                 actor.localPosition = section.ActorStart + Vector3.left * Mathf.Lerp(0f, 10.7f, Mathf.InverseLerp(.6f, clearAfter, hazardTime));
                 if (section.Ball) section.Ball.transform.localPosition =
                     section.BallStart + Vector3.left * Mathf.Lerp(0f, 10.8f, Mathf.Clamp01(hazardTime / 1.7f));
+            }
+
+            if (clear)
+            {
+                if (bus)
+                {
+                    if (front > stopLine + 20f) actor.gameObject.SetActive(false);
+                }
+                else actor.gameObject.SetActive(false);
+                if (section.Ball) section.Ball.SetActive(false);
             }
 
             if (front >= stopLine - 24f && front <= stopLine && speed <= .1f && (!emergency || vehicle.position.x > 4f))
@@ -310,6 +423,18 @@ namespace BCRoot
             if (!stopped) End(emergency ? "Pull over and make a complete stop." : "Come to a complete stop before the line.");
             else if (!clear) End("Wait until the conflict area is clear.");
             else if (intersection && (!checkedLeft || !checkedRight)) End("Check left and right before proceeding.");
+        }
+
+        static void ClearScenarioProps(Section section)
+        {
+            section.Cue.SetActive(false);
+            if (section.Actor) section.Actor.gameObject.SetActive(false);
+            if (section.ParkedCar) section.ParkedCar.gameObject.SetActive(false);
+            if (section.CrossingChild) section.CrossingChild.SetActive(false);
+            if (section.Ball) section.Ball.SetActive(false);
+            if (section.Signal) section.Signal.SetActive(false);
+            if (section.StopArm) section.StopArm.SetActive(false);
+            if (section.BrakeLights) section.BrakeLights.SetActive(false);
         }
 
         void StartRound()
@@ -338,7 +463,7 @@ namespace BCRoot
             completedSessionScenario = false;
             sectionIndex = 0;
             distance = 0;
-            vehicle.position = new Vector3(Lane, 0f, 0f);
+            vehicle.position = new Vector3(Lane, 0f, worldStart);
             speed = 50f;
             ResetSection();
             ShowDrive();
@@ -350,17 +475,25 @@ namespace BCRoot
             hazardTime = overspeedTime = closeTime = stoppedTime = 0f;
             prompted = stopped = checkedLeft = checkedRight = false;
             var section = course[sectionIndex];
-            if (section.Actor) section.Actor.localPosition = section.ActorStart;
+            if (section.Actor)
+            {
+                section.Actor.localPosition = section.ActorStart;
+                section.Actor.gameObject.SetActive(section.Kind != Scenario.Ambulance);
+            }
+            if (section.ParkedCar) section.ParkedCar.gameObject.SetActive(true);
             if (section.CrossingChild)
             {
                 section.CrossingChild.transform.localPosition = section.ChildStart;
                 section.CrossingChild.SetActive(false);
             }
-            if (section.Ball) section.Ball.transform.localPosition = section.BallStart;
+            if (section.Ball)
+            {
+                section.Ball.transform.localPosition = section.BallStart;
+                section.Ball.SetActive(true);
+            }
             if (section.Signal) section.Signal.SetActive(false);
             if (section.StopArm) section.StopArm.SetActive(false);
             if (section.BrakeLights) section.BrakeLights.SetActive(false);
-            if (section.Kind == Scenario.Ambulance) section.Actor.gameObject.SetActive(false);
             section.Cue.SetActive(false);
             leadPosition = section.ActorStart.z;
             leadSpeed = 80f;
@@ -410,15 +543,7 @@ namespace BCRoot
             speed = 0f;
 
             completedSessionScenario = finished && useAuthoredScenario &&
-                ScenarioLauncher.TryCompleteScenario(gameObject.scene.path);
-            if (completedSessionScenario && ScenarioLauncher.HasRemaining)
-                StartCoroutine(LoadNextScenario());
-        }
-
-        IEnumerator LoadNextScenario()
-        {
-            yield return new WaitForSecondsRealtime(2f);
-            ScenarioLauncher.LoadNext();
+                ScenarioLauncher.TryCompleteFinalScenario(gameObject.scene.path);
         }
 
         void ShowResult()
@@ -426,9 +551,7 @@ namespace BCRoot
             if (completedSessionScenario)
             {
                 var progress = $"{ScenarioLauncher.CompletedCount}/{ScenarioLauncher.ScenarioCount}";
-                display.text = ScenarioLauncher.HasRemaining
-                    ? $"SCENARIO CLEAR   {progress}\nLoading the next scenario…"
-                    : $"SESSION COMPLETE   {progress}\nRight button / → for a new session";
+                display.text = $"SESSION COMPLETE   {progress}\nRight button / → for a new session";
                 return;
             }
 
@@ -518,9 +641,16 @@ namespace BCRoot
                 }
             }
 
-            section.Cue = Block(root, "Approach cue", new Vector3(kind == Scenario.Ambulance ? roadWidth / 2f - .16f : Lane * 2f - .16f, .015f,
-                    58f + (kind == Scenario.Ambulance ? EmergencyOffset : 0f)),
-                new Vector3(.11f, .015f, 22f), amber);
+            var (cueStart, cueEnd, cueCenter, cueWidth) = kind switch
+            {
+                Scenario.Ambulance => (45f + EmergencyOffset, EmergencyStopLine - 1f, 2.75f, 5.1f),
+                Scenario.Expressway => (76f, 116f, Lane, 3.25f),
+                Scenario.SchoolZone => (45f, 74f, Lane, 3.25f),
+                _ => (45f, Conflict - 1f, Lane, 3.25f)
+            };
+            section.Cue = Block(root, "Yellow slowdown zone", new Vector3(cueCenter, .015f, (cueStart + cueEnd) / 2f),
+                new Vector3(cueWidth, .015f, cueEnd - cueStart), slowdownZone);
+            section.Cue.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             section.Cue.SetActive(false);
 
             if (kind != Scenario.SchoolZone && kind != Scenario.Expressway)
@@ -573,7 +703,7 @@ namespace BCRoot
                     section.BrakeLights.SetActive(false);
                     break;
                 case Scenario.Ambulance:
-                    section.Actor = Place(ambulance, root, Lane, 15f + EmergencyOffset, 180f);
+                    section.Actor = Place(ambulance, root, Lane, 15f + EmergencyOffset, 0f);
                     section.Actor.gameObject.SetActive(false);
                     section.Signal = Shape(root, "Emergency light bar", new Vector3(0f, 2.45f, 0f), new Vector3(.85f, .12f, .27f), red,
                         PrimitiveType.Cube);
@@ -606,7 +736,7 @@ namespace BCRoot
         }
 
         float StopLinePosition(Section section) => section.StopLine
-            ? section.StopLine.position.z - sectionIndex * SectionLength
+            ? section.StopLine.position.z - worldStart - sectionIndex * SectionLength
             : (section.Kind == Scenario.Ambulance ? EmergencyStopLine : Conflict);
 
         bool HitParkedCar(Section section, Vector3 previousPosition)

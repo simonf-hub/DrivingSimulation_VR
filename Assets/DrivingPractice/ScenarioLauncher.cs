@@ -10,6 +10,8 @@ namespace BCRoot
 
         static readonly List<string> session = new();
         static string launcherScene;
+        static DrivingPractice stagedScenario;
+        static Scene previousScene;
 
         internal static int CompletedCount { get; private set; }
         internal static int ScenarioCount => session.Count;
@@ -18,6 +20,9 @@ namespace BCRoot
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetSession()
         {
+            SceneManager.sceneLoaded -= StageLoadedScenario;
+            stagedScenario = null;
+            previousScene = default;
             session.Clear();
             CompletedCount = 0;
             launcherScene = null;
@@ -52,23 +57,60 @@ namespace BCRoot
             }
 
             launcherScene = gameObject.scene.path;
-            LoadNext();
+            SceneManager.LoadSceneAsync(session[0], LoadSceneMode.Single);
         }
 
         internal static bool IsCurrentScenario(string path) =>
             HasRemaining && session[CompletedCount] == path;
 
-        internal static bool TryCompleteScenario(string path)
+        internal static bool HasFollowingScenario(string path) =>
+            IsCurrentScenario(path) && CompletedCount + 1 < ScenarioCount;
+
+        internal static void PreloadFollowing(DrivingPractice current)
         {
-            if (!IsCurrentScenario(path)) return false;
+            if (!HasFollowingScenario(current.gameObject.scene.path)) return;
+            SceneManager.sceneLoaded += StageLoadedScenario;
+            SceneManager.LoadSceneAsync(session[CompletedCount + 1], LoadSceneMode.Additive);
+        }
+
+        static void StageLoadedScenario(Scene scene, LoadSceneMode mode)
+        {
+            if (mode != LoadSceneMode.Additive || CompletedCount + 1 >= ScenarioCount ||
+                scene.path != session[CompletedCount + 1]) return;
+
+            SceneManager.sceneLoaded -= StageLoadedScenario;
+            foreach (var root in scene.GetRootGameObjects())
+            {
+                if (!root.TryGetComponent<DrivingPractice>(out var next)) continue;
+                next.StageForSession((CompletedCount + 1) * DrivingPractice.SectionLength);
+                stagedScenario = next;
+                return;
+            }
+
+            Debug.LogError($"No Driving Practice controller found in {scene.path}.");
+        }
+
+        internal static bool TryAdvance(DrivingPractice current)
+        {
+            if (!stagedScenario || !HasFollowingScenario(current.gameObject.scene.path)) return false;
+
+            var next = stagedScenario;
+            stagedScenario = null;
             CompletedCount++;
+            current.LeaveSessionSection();
+            SceneManager.SetActiveScene(next.gameObject.scene);
+            next.EnterSessionSection(current);
+            if (previousScene.IsValid()) SceneManager.UnloadSceneAsync(previousScene);
+            previousScene = current.gameObject.scene;
+            PreloadFollowing(next);
             return true;
         }
 
-        internal static void LoadNext()
+        internal static bool TryCompleteFinalScenario(string path)
         {
-            if (HasRemaining)
-                SceneManager.LoadSceneAsync(session[CompletedCount], LoadSceneMode.Single);
+            if (!IsCurrentScenario(path) || CompletedCount + 1 != ScenarioCount) return false;
+            CompletedCount++;
+            return true;
         }
 
         internal static void RestartSession()
