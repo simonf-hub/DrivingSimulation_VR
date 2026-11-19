@@ -55,6 +55,7 @@ namespace BCRoot
         Quaternion seatedHeading;
         float yaw, pitch;
         bool usingHeadset;
+        MobileDrivingControls mobileControls = new();
 
         [Serializable]
         sealed class Section
@@ -147,6 +148,7 @@ namespace BCRoot
             vehicle.position = previous.vehicle.position;
             speed = previous.speed;
             gear = previous.gear;
+            mobileControls = previous.mobileControls;
             leftHeld = previous.leftHeld;
             rightHeld = previous.rightHeld;
             yaw = previous.yaw;
@@ -220,11 +222,15 @@ namespace BCRoot
             var keyboard = Keyboard.current;
             var left = Pressed(XRNode.LeftHand) || keyboard?.leftArrowKey.isPressed == true;
             var right = Pressed(XRNode.RightHand) || keyboard?.rightArrowKey.isPressed == true;
-            var upshift = right && !rightHeld;
-            var downshift = left && !leftHeld;
+            var touch = mobileControls.Read();
+            UpdateView(touch.LookDelta);
+            var touchEnabled = !usingHeadset;
+            var upshift = (right && !rightHeld) || (touchEnabled && touch.RightTap);
+            var downshift = (left && !leftHeld) || (touchEnabled && touch.LeftTap);
             leftHeld = left;
             rightHeld = right;
-            UpdateView();
+            left |= touchEnabled && touch.LeftTap;
+            right |= touchEnabled && touch.RightTap;
 
             if (result != null)
             {
@@ -502,7 +508,14 @@ namespace BCRoot
             speaker.volume = 1f;
         }
 
-        void UpdateView()
+        void OnGUI()
+        {
+            if (usingHeadset || !MobileDrivingControls.Visible) return;
+            mobileControls.Draw(result == null, result == null ? "+  Speed up" :
+                completedSessionScenario ? "New session" : "Retry");
+        }
+
+        void UpdateView(Vector2 touchDelta)
         {
             var head = InputDevices.GetDeviceAtXRNode(XRNode.Head);
             if (head.TryGetFeatureValue(UnityEngine.XR.CommonUsages.devicePosition, out var position) &&
@@ -523,12 +536,11 @@ namespace BCRoot
 
             usingHeadset = false;
             var mouse = Mouse.current;
-            if (mouse?.rightButton.isPressed == true)
-            {
-                var delta = mouse.delta.ReadValue();
-                yaw = Mathf.Clamp(yaw + delta.x * .17f, -100f, 100f);
-                pitch = Mathf.Clamp(pitch - delta.y * .17f, -40f, 40f);
-            }
+            var look = touchDelta * (105f / Mathf.Max(1f, Mathf.Min(Screen.width, Screen.height)));
+            if (!MobileDrivingControls.UsesTouch && mouse?.rightButton.isPressed == true)
+                look = mouse.delta.ReadValue() * .17f;
+            yaw = Mathf.Clamp(yaw + look.x, -100f, 100f);
+            pitch = Mathf.Clamp(pitch - look.y, -40f, 40f);
             driverView.localPosition = Vector3.zero;
             driverView.localRotation = Quaternion.Euler(pitch, yaw, 0f);
         }
@@ -551,18 +563,23 @@ namespace BCRoot
             if (completedSessionScenario)
             {
                 var progress = $"{ScenarioLauncher.CompletedCount}/{ScenarioLauncher.ScenarioCount}";
-                display.text = $"SESSION COMPLETE   {progress}\nRight button / → for a new session";
+                var restart = MobileDrivingControls.UsesTouch && !usingHeadset
+                    ? "Tap New session" : "Right button / → for a new session";
+                display.text = $"SESSION COMPLETE   {progress}\n{restart}";
                 return;
             }
 
             var retry = useAuthoredScenario ? "retry this scenario" : "start a new round";
-            display.text = $"{(finished ? "ROUND COMPLETE" : "TRY AGAIN")}\n{result}\nRight button / → to {retry}";
+            var retryPrompt = MobileDrivingControls.UsesTouch && !usingHeadset
+                ? "Tap Retry" : $"Right button / → to {retry}";
+            display.text = $"{(finished ? "ROUND COMPLETE" : "TRY AGAIN")}\n{result}\n{retryPrompt}";
         }
 
         void ShowDrive()
         {
             var kind = course[sectionIndex].Kind;
-            var instruction = "Left / ← slower      Right / → faster";
+            var instruction = MobileDrivingControls.UsesTouch && !usingHeadset
+                ? "Drag to look around" : "Left / ← slower      Right / → faster";
             if (kind == Scenario.FlashingRed && prompted && distance - sectionIndex * SectionLength + Nose < StopLinePosition(course[sectionIndex]))
             {
                 if (!stopped) instruction = "Flashing red: stop at the line";
