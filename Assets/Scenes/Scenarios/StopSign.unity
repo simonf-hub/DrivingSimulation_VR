@@ -4265,7 +4265,7 @@ TextMesh:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1519159910}
-  m_Text: "Driving practice\nLeft / \u2190 faster   Right / \u2192 slower"
+  m_Text: "Driving practice\nLeft / \u2190 slower   Right / \u2192 faster"
   m_OffsetZ: 0
   m_CharacterSize: 0.0045
   m_LineSpacing: 0.84

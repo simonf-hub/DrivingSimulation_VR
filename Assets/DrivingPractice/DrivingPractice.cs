@@ -134,15 +134,15 @@ namespace BCRoot
             var keyboard = Keyboard.current;
             var left = Pressed(XRNode.LeftHand) || keyboard?.leftArrowKey.isPressed == true;
             var right = Pressed(XRNode.RightHand) || keyboard?.rightArrowKey.isPressed == true;
-            var upshift = left && !leftHeld;
-            var downshift = right && !rightHeld;
+            var upshift = right && !rightHeld;
+            var downshift = left && !leftHeld;
             leftHeld = left;
             rightHeld = right;
             UpdateView();
 
             if (result != null)
             {
-                if (upshift && !right)
+                if (upshift && !left)
                 {
                     if (!completedSessionScenario) StartRound();
                     else if (!ScenarioLauncher.HasRemaining)
@@ -155,7 +155,7 @@ namespace BCRoot
                 return;
             }
 
-            if (downshift && !left && gear > 0)
+            if (downshift && !right && gear > 0)
             {
                 if (speed > Speeds[gear] + .15f)
                 {
@@ -164,7 +164,7 @@ namespace BCRoot
                 }
                 gear--;
             }
-            if (upshift && !right) gear = Mathf.Min(gear + 1, Speeds.Length - 1);
+            if (upshift && !left) gear = Mathf.Min(gear + 1, Speeds.Length - 1);
 
             // Limit movement per step so a slow frame cannot jump over a stop line.
             var remaining = Mathf.Min(Time.deltaTime, .1f);
@@ -428,18 +428,18 @@ namespace BCRoot
                 var progress = $"{ScenarioLauncher.CompletedCount}/{ScenarioLauncher.ScenarioCount}";
                 display.text = ScenarioLauncher.HasRemaining
                     ? $"SCENARIO CLEAR   {progress}\nLoading the next scenario…"
-                    : $"SESSION COMPLETE   {progress}\nLeft button / ← for a new session";
+                    : $"SESSION COMPLETE   {progress}\nRight button / → for a new session";
                 return;
             }
 
             var retry = useAuthoredScenario ? "retry this scenario" : "start a new round";
-            display.text = $"{(finished ? "ROUND COMPLETE" : "TRY AGAIN")}\n{result}\nLeft button / ← to {retry}";
+            display.text = $"{(finished ? "ROUND COMPLETE" : "TRY AGAIN")}\n{result}\nRight button / → to {retry}";
         }
 
         void ShowDrive()
         {
             var kind = course[sectionIndex].Kind;
-            var instruction = "Left / ← faster      Right / → slower";
+            var instruction = "Left / ← slower      Right / → faster";
             if (kind == Scenario.FlashingRed && prompted && distance - sectionIndex * SectionLength + Nose < StopLinePosition(course[sectionIndex]))
             {
                 if (!stopped) instruction = "Flashing red: stop at the line";
