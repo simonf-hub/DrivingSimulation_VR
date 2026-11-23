@@ -4,36 +4,40 @@ using TouchPhase = UnityEngine.InputSystem.TouchPhase;
 
 namespace BCRoot
 {
+    // Screen input for phones and the editor: taps on the two pedals (bottom right, side by side, so one thumb rocks
+    // between them like a foot on real pedals), the Ahead button (top right), and swipes anywhere else to look around.
+    // The pedals are drawn by DrivingPractice.Pedals.cs using the same rectangles.
     internal sealed class MobileDrivingControls
     {
-        static readonly Color normalColor = new(.07f, .12f, .16f, .92f);
-        static readonly Color retryColor = new(.08f, .32f, .40f, .98f);
-
-        GUIStyle buttonStyle;
-        bool clickLeft, clickRight, clickAhead;
         Touchscreen lastScreen;
         int[] activeTouchIds;
 
         internal static bool UsesTouch => Application.isMobilePlatform || Touchscreen.current != null;
-        internal static bool Visible => UsesTouch || Application.isEditor;
 
+        // Rectangles in screen pixels (origin bottom left).
         internal (bool LeftTap, bool RightTap, bool AheadTap, Vector2 LookDelta) Read()
         {
-            var left = clickLeft;
-            var right = clickRight;
-            var ahead = clickAhead;
-            clickLeft = clickRight = clickAhead = false;
+            var (slower, faster, ahead) = ButtonAreas(Screen.safeArea);
+            bool left = false, right = false, aheadTap = false;
             var lookDelta = Vector2.zero;
-            var hasLookFinger = false;
-            if (Touchscreen.current is not { } screen) return (left, right, ahead, lookDelta);
 
-            var (leftArea, rightArea, aheadArea) = ButtonAreas(Screen.safeArea);
+            // Mouse (editor, desktop): a click on a pedal presses it.
+            if (!UsesTouch && Mouse.current is { } mouse && mouse.leftButton.wasPressedThisFrame)
+            {
+                var p = mouse.position.ReadValue();
+                left = slower.Contains(p);
+                right = faster.Contains(p);
+                aheadTap = ahead.Contains(p);
+            }
+
+            if (Touchscreen.current is not { } screen) return (left, right, aheadTap, lookDelta);
             if (screen != lastScreen)
             {
                 lastScreen = screen;
                 activeTouchIds = new int[screen.touches.Count];
             }
 
+            var hasLookFinger = false;
             for (var i = 0; i < screen.touches.Count; i++)
             {
                 var touch = screen.touches[i];
@@ -48,60 +52,39 @@ namespace BCRoot
                 var isNew = phase == TouchPhase.Began && activeTouchIds[i] != id;
                 activeTouchIds[i] = id;
                 var start = touch.startPosition.ReadValue();
-                if (leftArea.Contains(start)) left |= isNew;
-                else if (rightArea.Contains(start)) right |= isNew;
-                else if (aheadArea.Contains(start)) ahead |= isNew;
+                if (slower.Contains(start)) left |= isNew;
+                else if (faster.Contains(start)) right |= isNew;
+                else if (ahead.Contains(start)) aheadTap |= isNew;
                 else if (!hasLookFinger && !isNew)
                 {
                     lookDelta = touch.delta.ReadValue();
                     hasLookFinger = true;
                 }
             }
-            return (left, right, ahead, lookDelta);
+            return (left, right, aheadTap, lookDelta);
         }
 
-        internal void Draw(bool showLeft, string rightLabel)
+        // Brake (Slower) wide and flat, accelerator (Faster) tall and narrow, bottoms aligned, in the bottom-right corner.
+        // The CC button: top right corner, right of Ahead.
+        internal static Rect CcArea(Rect safeArea)
         {
-            var (left, right, ahead) = ButtonAreas(Screen.safeArea);
-            buttonStyle ??= new GUIStyle(GUI.skin.button) { fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-            buttonStyle.fontSize = Mathf.Clamp(Mathf.RoundToInt(left.height * .31f), 18, 56);
-
-            var color = GUI.backgroundColor;
-            if (showLeft)
-            {
-                GUI.backgroundColor = normalColor;
-                clickLeft |= DrawButton(ToGui(left), "−  Slow down");
-                if (ahead.width > 0f) clickAhead |= DrawButton(ToGui(ahead), "Ahead");
-            }
-            GUI.backgroundColor = showLeft ? normalColor : retryColor;
-            if (rightLabel != null) clickRight |= DrawButton(ToGui(right), rightLabel);
-            GUI.backgroundColor = color;
+            var pill = Mathf.Clamp(Mathf.Min(safeArea.width, safeArea.height) * .09f, 44f, 110f);
+            return new Rect(safeArea.xMax - 12f - pill * 1.6f, safeArea.yMax - 12f - pill, pill * 1.6f, pill);
         }
 
-        bool DrawButton(Rect rect, string label)
-        {
-            // Read touches only through the Input System, so a simulated mouse click cannot shift twice.
-            if (!UsesTouch) return GUI.Button(rect, label, buttonStyle);
-            GUI.Box(rect, label, buttonStyle);
-            return false;
-        }
-
-        static Rect ToGui(Rect rect) => new(rect.x, Screen.height - rect.yMax, rect.width, rect.height);
-
-        internal static (Rect Left, Rect Right, Rect Ahead) ButtonAreas(Rect safeArea)
+        internal static (Rect Slower, Rect Faster, Rect Ahead) ButtonAreas(Rect safeArea)
         {
             var shortSide = Mathf.Min(safeArea.width, safeArea.height);
-            var height = Mathf.Clamp(shortSide * .15f, 54f, 180f);
-            var margin = Mathf.Max(12f, shortSide * .035f);
-            var width = Mathf.Min(height * 2.75f, (safeArea.width - margin * 3f) / 2f);
-            var bottom = safeArea.yMin + margin;
-            // Recentre button sits between the two, if there is room (always in landscape).
-            var aheadWidth = Mathf.Min(height * 1.6f, safeArea.width - (width + margin) * 2f - margin * 2f);
-            var ahead = aheadWidth < height
-                ? Rect.zero
-                : new Rect(safeArea.center.x - aheadWidth / 2f, bottom, aheadWidth, height);
-            return (new Rect(safeArea.xMin + margin, bottom, width, height),
-                new Rect(safeArea.xMax - margin - width, bottom, width, height), ahead);
+            var margin = Mathf.Max(14f, shortSide * .04f);
+            var gasHeight = Mathf.Clamp(shortSide * .3f, 110f, 300f);
+            var gas = new Rect(safeArea.xMax - margin - gasHeight * .56f, safeArea.yMin + margin, gasHeight * .56f, gasHeight);
+            var brakeWidth = gasHeight * .9f;
+            var brake = new Rect(gas.x - margin * .7f - brakeWidth, gas.y, brakeWidth, gasHeight * .62f);
+
+            // Ahead: a small pill along the top right, left of the CC button.
+            var pill = Mathf.Clamp(shortSide * .09f, 44f, 110f);
+            var ahead = new Rect(safeArea.xMax - 12f - pill * 1.6f - 10f - pill * 2.1f, safeArea.yMax - 12f - pill, pill * 2.1f, pill);
+            return (brake, gas, ahead);
         }
     }
 }

@@ -16,10 +16,6 @@ namespace BCRoot
         const float Lane = 1.85f;
         const float Nose = 2.66f; // front bumper, metres ahead of the player car's origin
         static int[] Speeds => PortSpec.Current.engine.gearsKmh;
-        static readonly string[] Names = {
-            "Stop sign", "Obstructed crossing", "School zone", "Playground zone",
-            "Expressway", "Flashing red", "Emergency vehicle", "School bus"
-        };
 
         // scenario_spec.json ids, in Scenario enum order.
         static readonly string[] SpecIds = { "stop", "hidden_ped", "school", "playground", "lead_car", "flashing_red", "ambulance", "school_bus" };
@@ -102,6 +98,9 @@ namespace BCRoot
             playerCarBounds = CarBoundsRelativeTo(vehicle);
             CreateMirror();
             CreateInteriorRoof();
+            CreateHud();
+            CreatePedals();
+            CreateCards();
             StartRound();
         }
 
@@ -205,11 +204,12 @@ namespace BCRoot
             var left = Pressed(XRNode.LeftHand) || keyboard?.leftArrowKey.isPressed == true;
             var right = Pressed(XRNode.RightHand) || keyboard?.rightArrowKey.isPressed == true;
             var touch = mobileControls.Read();
-            var dismissTap = coach.ReadDismissInput();
+            var dismissTap = coach.ReadDismissInput(MobileDrivingControls.CcArea(Screen.safeArea));
             UpdateView(touch.LookDelta, touch.AheadTap || keyboard?.upArrowKey.wasPressedThisFrame == true);
             coach.TiltActive = usingTilt;
             UpdateMirrorAlert();
             coach.Tick(Time.unscaledDeltaTime);
+            UpdateHud(); // also while a card is up or the result shows, so the HUD is never blank
             var touchEnabled = !usingHeadset;
             var upshift = (right && !rightHeld) || (touchEnabled && touch.RightTap);
             var downshift = (left && !leftHeld) || (touchEnabled && touch.LeftTap);
@@ -217,6 +217,7 @@ namespace BCRoot
             rightHeld = right;
             left |= touchEnabled && touch.LeftTap;
             right |= touchEnabled && touch.RightTap;
+            UpdatePedals(downshift, upshift);
 
             if (result != null)
             {
@@ -340,6 +341,7 @@ namespace BCRoot
         void StartRound()
         {
             result = null;
+            resultLine = null;
             finished = false;
             completedSessionScenario = false;
             distance = 0;
@@ -386,26 +388,11 @@ namespace BCRoot
             speaker.volume = 1f;
         }
 
-        void OnGUI()
-        {
-            if (usingHeadset) return;
-            if (MobileDrivingControls.Visible)
-            {
-                GUI.enabled = !coach.Paused; // a click only closes the card, so it must not also press a button
-                mobileControls.Draw(result == null, result == null ? "+  Speed up" :
-                    completedSessionScenario ? "New session" : "Retry");
-                GUI.enabled = true;
-            }
-            var mirrorBottom = MirrorBottomOnScreen();
-            var buttons = MobileDrivingControls.ButtonAreas(Screen.safeArea).Left;
-            coach.Draw(Screen.height - buttons.yMax, mirrorBottom);
-        }
-
         // Every fail names a code (for the log and results) and the beaver line that explains it.
         void Fail(string code, string lineId, string side = null, int? metres = null)
         {
-            var line = coach.Fail(code, lineId, side, metres);
-            End($"{line.Caption}\n{line.Text}");
+            resultLine = coach.Fail(code, lineId, side, metres);
+            End($"{resultLine.Caption}\n{resultLine.Text}");
         }
 
         void UpdateView(Vector2 touchDelta, bool recentre)
@@ -497,6 +484,7 @@ namespace BCRoot
             gear = value;
             var target = Speeds[gear];
             var seconds = target < speed ? engine.slowerStepSeconds : engine.fasterStepSeconds;
+            if (target < speed) slowFromSpeed = speed; // for the brake's "still slowing" fill
             changeRate = Mathf.Max(engine.minChangeRateKmhPerSecond, Mathf.Abs(speed - target) / seconds);
         }
 
@@ -512,8 +500,14 @@ namespace BCRoot
             completedSessionScenario = finished && ScenarioLauncher.TryCompleteFinalScenario(gameObject.scene.path);
         }
 
+        // On a phone the result card shows this (DrivingPractice.Cards.cs); the dashboard text is the headset fallback.
         void ShowResult()
         {
+            if (!usingHeadset)
+            {
+                display.text = "";
+                return;
+            }
             if (completedSessionScenario)
             {
                 var progress = $"{ScenarioLauncher.CompletedCount}/{ScenarioLauncher.ScenarioCount}";
@@ -528,22 +522,14 @@ namespace BCRoot
             display.text = $"{(finished ? "ROUND COMPLETE" : "TRY AGAIN")}\n{result}\n{retryPrompt}";
         }
 
-        void ShowDrive()
-        {
-            var kind = authoredScenario.Kind;
-            var instruction = MobileDrivingControls.UsesTouch && !usingHeadset
-                ? "Drag to look around" : "Left / ← slower      Right / → faster";
-            var progress = ScenarioLauncher.IsCurrentScenario(gameObject.scene.path)
-                ? $"{ScenarioLauncher.CompletedCount + 1}/{ScenarioLauncher.ScenarioCount}"
-                : "1/1";
-            display.text = $"{progress}   {Names[(int)kind]}\n" +
-                $"{Mathf.RoundToInt(speed)} km/h   ·   Target {Speeds[gear]}\n{instruction}";
-            if (usingHeadset && coach.HeadsetText.Length > 0) display.text += $"\n\n{coach.HeadsetText}"; // OnGUI is not drawn in a headset
-        }
+        // While driving, speed and limit are on the windshield HUD; the dashboard text only carries the beaver's words
+        // in a headset, where the screen overlay is not drawn.
+        void ShowDrive() => display.text = usingHeadset ? coach.HeadsetText : "";
 
         void OnDestroy()
         {
             DestroyMirror();
+            DestroyPedals();
             if (headlinerMesh) Destroy(headlinerMesh);
             foreach (var material in materials) Destroy(material);
             if (prompt) Destroy(prompt);

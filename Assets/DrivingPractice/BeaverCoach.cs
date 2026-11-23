@@ -26,6 +26,9 @@ namespace BCRoot
         internal string LastFailCode { get; private set; }
         internal float LastSayTime { get; private set; } = float.NegativeInfinity;
         internal bool Paused => card != null;
+        // What to draw (DrivingPractice.Cards.cs): the pause-and-explain card, else the short caption near the road.
+        internal Line Card => card;
+        internal Line Caption => caption;
 
         readonly Queue<Line> cardQueue = new();
         Line card, caption, pendingVoice, pendingAlert;
@@ -33,7 +36,6 @@ namespace BCRoot
         bool chimeIfSilent;
         AudioSource voice;
         AudioClip chime;
-        GUIStyle captionStyle, subtitleStyle, cardTitleStyle, cardTextStyle, hintStyle;
 
         static PortSpec.EngineSpec Engine => PortSpec.Current.engine;
         static PortSpec.PauseSpec Pause => PortSpec.Current.modes.practice.pauseAndExplain;
@@ -124,14 +126,13 @@ namespace BCRoot
         }
 
         // CC toggles on its button or the C key. Returns true when the player tapped to close a card.
-        internal bool ReadDismissInput()
+        // ccArea is in screen pixels (origin bottom left).
+        internal bool ReadDismissInput(Rect ccArea)
         {
             var pointer = Pointer.current;
             if (pointer != null && pointer.press.wasPressedThisFrame)
             {
-                var position = pointer.position.ReadValue();
-                var cc = CcArea();
-                if (cc.Contains(new Vector2(position.x, Screen.height - position.y)))
+                if (ccArea.Contains(pointer.position.ReadValue()))
                 {
                     Subtitles = !Subtitles;
                     return false;
@@ -145,7 +146,7 @@ namespace BCRoot
                 keyboard.numpadEnterKey.wasPressedThisFrame);
         }
 
-        // Plain text for the headset, where OnGUI is not drawn.
+        // Plain text for the headset, where the screen overlay is not drawn.
         internal string HeadsetText
         {
             get
@@ -154,55 +155,6 @@ namespace BCRoot
                 if (caption == null) return "";
                 return Subtitles && caption.Text != caption.Caption ? $"{caption.Caption}\n{caption.Text}" : caption.Caption;
             }
-        }
-
-        internal void Draw(float buttonTop, float mirrorBottom)
-        {
-            EnsureStyles();
-            var safe = Screen.safeArea;
-            var guiSafe = new Rect(safe.x, Screen.height - safe.yMax, safe.width, safe.height);
-
-            var cc = CcArea();
-            var color = GUI.backgroundColor;
-            GUI.backgroundColor = Subtitles ? new Color(.08f, .32f, .40f, .95f) : new Color(.07f, .12f, .16f, .85f);
-            GUI.Box(cc, Subtitles ? "CC on" : "CC", hintStyle);
-            GUI.backgroundColor = color;
-
-            if (card != null)
-            {
-                // Just above the middle of the screen, but never over the rear-view mirror.
-                var width = Mathf.Min(guiSafe.width * .8f, 960f);
-                var body = card.Text != card.Caption ? card.Text : "";
-                var titleHeight = cardTitleStyle.CalcHeight(new GUIContent(card.Caption), width - 48f);
-                var textHeight = body.Length > 0 ? cardTextStyle.CalcHeight(new GUIContent(body), width - 48f) : 0f;
-                var hintHeight = hintStyle.CalcHeight(new GUIContent("Tap anywhere to continue"), width - 48f);
-                var height = titleHeight + textHeight + hintHeight + 56f;
-                var rect = new Rect(guiSafe.center.x - width / 2f, Mathf.Max(guiSafe.y + 8f, mirrorBottom + 10f, Screen.height / 2f - height - 6f), width, height);
-                GUI.backgroundColor = new Color(.05f, .09f, .12f, .96f);
-                GUI.Box(rect, GUIContent.none);
-                GUI.backgroundColor = color;
-                var y = rect.y + 18f;
-                GUI.Label(new Rect(rect.x + 24f, y, width - 48f, titleHeight), card.Caption, cardTitleStyle);
-                y += titleHeight + 8f;
-                if (body.Length > 0) GUI.Label(new Rect(rect.x + 24f, y, width - 48f, textHeight), body, cardTextStyle);
-                y += textHeight + 12f;
-                GUI.Label(new Rect(rect.x + 24f, y, width - 48f, hintHeight), "Tap anywhere to continue", hintStyle);
-                return;
-            }
-
-            if (caption == null) return;
-            // Low band above the buttons, so the road ahead stays clear.
-            var capWidth = Mathf.Min(guiSafe.width * .7f, 1100f);
-            var sub = Subtitles && caption.Text != caption.Caption ? caption.Text : "";
-            var capHeight = captionStyle.CalcHeight(new GUIContent(caption.Caption), capWidth - 32f);
-            var subHeight = sub.Length > 0 ? subtitleStyle.CalcHeight(new GUIContent(sub), capWidth - 32f) : 0f;
-            var boxHeight = capHeight + subHeight + 20f;
-            var box = new Rect(guiSafe.center.x - capWidth / 2f, buttonTop - boxHeight - 12f, capWidth, boxHeight);
-            GUI.backgroundColor = caption.Kind == "fail" ? new Color(.45f, .08f, .06f, .9f) : new Color(.05f, .09f, .12f, .85f);
-            GUI.Box(box, GUIContent.none);
-            GUI.backgroundColor = color;
-            GUI.Label(new Rect(box.x + 16f, box.y + 10f, capWidth - 32f, capHeight), caption.Caption, captionStyle);
-            if (sub.Length > 0) GUI.Label(new Rect(box.x + 16f, box.y + 10f + capHeight, capWidth - 32f, subHeight), sub, subtitleStyle);
         }
 
         void ShowNextCard()
@@ -247,29 +199,6 @@ namespace BCRoot
         {
             card = pendingAlert = null;
             cardQueue.Clear();
-        }
-
-        static Rect CcArea()
-        {
-            var safe = Screen.safeArea;
-            var size = Mathf.Clamp(Mathf.Min(safe.width, safe.height) * .09f, 44f, 110f);
-            return new Rect(safe.xMax - size * 1.6f - 12f, Screen.height - safe.yMax + 12f, size * 1.6f, size);
-        }
-
-        void EnsureStyles()
-        {
-            var unit = Mathf.Min(Screen.width, Screen.height);
-            if (captionStyle != null && captionStyle.fontSize == Mathf.RoundToInt(unit * .045f)) return;
-            GUIStyle Make(float size, FontStyle style, TextAnchor anchor) => new(GUI.skin.label)
-            {
-                fontSize = Mathf.Max(14, Mathf.RoundToInt(unit * size)), fontStyle = style, alignment = anchor, wordWrap = true,
-                normal = { textColor = Color.white }
-            };
-            captionStyle = Make(.045f, FontStyle.Bold, TextAnchor.MiddleCenter);
-            subtitleStyle = Make(.03f, FontStyle.Normal, TextAnchor.MiddleCenter);
-            cardTitleStyle = Make(.05f, FontStyle.Bold, TextAnchor.UpperLeft);
-            cardTextStyle = Make(.035f, FontStyle.Normal, TextAnchor.UpperLeft);
-            hintStyle = Make(.025f, FontStyle.Normal, TextAnchor.MiddleCenter);
         }
 
         static Line Resolve(string id, string side, int? metres)
