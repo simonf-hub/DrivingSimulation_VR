@@ -29,6 +29,7 @@ namespace BCRoot
         // What to draw (DrivingPractice.Cards.cs): the pause-and-explain card, else the short caption near the road.
         internal Line Card => card;
         internal Line Caption => caption;
+        internal bool Speaking => voice && voice.isPlaying;
 
         readonly Queue<Line> cardQueue = new();
         Line card, caption, pendingVoice, pendingAlert;

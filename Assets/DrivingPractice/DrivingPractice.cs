@@ -100,6 +100,7 @@ namespace BCRoot
             CreateInteriorRoof();
             CreateHud();
             CreatePedals();
+            CreateBeaver();
             CreateCards();
             StartRound();
         }
@@ -530,6 +531,7 @@ namespace BCRoot
         {
             DestroyMirror();
             DestroyPedals();
+            DestroyBeaver();
             if (headlinerMesh) Destroy(headlinerMesh);
             foreach (var material in materials) Destroy(material);
             if (prompt) Destroy(prompt);

@@ -7,6 +7,6 @@
 | `Prefabs/Character.prefab` as children | School zone sidewalk (spec: 6 children and 1 adult) | No child model exists, so all 7 are the adult character | A child model (also needed for the playground and school bus scenarios). |
 | None (playground area) | Playground scenario, left side z 62-108 | Only a fence marks the play area; the spec has a sand area, swing set and slide | Playground equipment model(s). The child runs out through the fence gap at z 84-92; keep a gap there. |
 | Headliner, sun visors, dome light (built in code: `DrivingPractice.Roof.cs`) | Inside the player's car | The sedan model's roof is single-sided (faces the sky), so it is invisible from the driver's seat; code adds a simple interior shaped to the roof | A sedan model with a proper interior roof (headliner, visors, dome light, grab handles). Then delete `DrivingPractice.Roof.cs`. The sedan's source and licence are also unconfirmed. |
-| `Beaver/Beaver_Nov23.fbx` | Not placed yet | Static model: no rig or blendshapes for expressions; texture not linked to its material | To ask the artist: blendshapes or a separate mouth/jaw, and named parts. |
+| `Resources/Beaver/Beaver_Nov23.fbx` | Passenger seat, and the live portrait on cards and captions | Static model: no rig or blendshapes, so it only bobs, tilts and blinks (eye meshes squashed) |  To ask the artist: blendshapes or a separate mouth/jaw, and named parts. |
 
 Kenney assets are CC0 (see the licence files beside them). Crediting Kenney is optional.

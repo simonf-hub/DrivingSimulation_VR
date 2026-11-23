@@ -16,7 +16,7 @@ namespace BCRoot
         static readonly Color Cream = new(1f, .97f, .91f), Navy = new(.08f, .15f, .29f), NavySoft = new(.2f, .27f, .4f);
         static readonly Color HintGrey = new(.42f, .47f, .56f), PillDark = new(.07f, .12f, .16f, .85f);
 
-        RectTransform cardPanel, captionPanel, ccButton;
+        RectTransform cardPanel, captionPanel, ccButton, cardPortrait, captionPortrait;
         Image cardRim, captionRim, ccImage;
         TextMeshProUGUI cardTitle, cardBody, cardHint, captionTitle, captionSub, ccLabel;
         BeaverCoach.Line resultLine; // the fail line on the result card; null after a pass
@@ -44,6 +44,8 @@ namespace BCRoot
             captionPanel = Card(canvas, "Beaver caption", out captionRim);
             captionTitle = CardText(captionPanel, "Caption", fredoka, Navy, TextAlignmentOptions.Top);
             captionSub = CardText(captionPanel, "Subtitle", dmRegular, NavySoft, TextAlignmentOptions.Top);
+            cardPortrait = Portrait(cardPanel);
+            captionPortrait = Portrait(captionPanel);
 
             ccButton = PedalPanel(canvas, "CC button", PillDark, out ccImage);
             ccLabel = PedalLabel(ccButton, dmBold, "CC");
@@ -63,6 +65,24 @@ namespace BCRoot
             return rect;
         }
 
+        // The beaver's live portrait (filmed in the passenger seat by DrivingPractice.Beaver.cs), in a rounded frame.
+        RectTransform Portrait(RectTransform card)
+        {
+            var frame = Panel(card, "Beaver portrait", new Color(.93f, .87f, .76f));
+            frame.gameObject.AddComponent<Mask>().showMaskGraphic = true;
+            var rect = frame.rectTransform;
+            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
+            var picture = new GameObject("Picture").AddComponent<RawImage>();
+            picture.transform.SetParent(rect, false);
+            picture.texture = BeaverPortrait;
+            picture.raycastTarget = false;
+            var pictureRect = picture.rectTransform;
+            pictureRect.anchorMin = Vector2.zero;
+            pictureRect.anchorMax = Vector2.one;
+            pictureRect.offsetMin = pictureRect.offsetMax = Vector2.zero;
+            return rect;
+        }
+
         static TextMeshProUGUI CardText(RectTransform card, string name, TMP_FontAsset font, Color color, TextAlignmentOptions align)
         {
             var text = new GameObject(name).AddComponent<TextMeshProUGUI>();
@@ -78,10 +98,10 @@ namespace BCRoot
         }
 
         // Lays out title / text / hint top to bottom inside a card of the given width; returns the card height.
-        static float Stack(float width, float pad, float gap, params (TextMeshProUGUI text, string content, float size)[] lines)
+        static float Stack(float width, float pad, float gap, float indent, params (TextMeshProUGUI text, string content, float size)[] lines)
         {
             var y = pad;
-            var inner = width - pad * 2f;
+            var inner = width - pad * 2f - indent;
             var first = true;
             foreach (var (text, content, size) in lines)
             {
@@ -93,7 +113,7 @@ namespace BCRoot
                 text.text = content;
                 text.fontSize = size;
                 var height = text.GetPreferredValues(content, inner, 0f).y;
-                text.rectTransform.anchoredPosition = new Vector2(pad, -y);
+                text.rectTransform.anchoredPosition = new Vector2(pad + indent, -y);
                 text.rectTransform.sizeDelta = new Vector2(inner, height);
                 y += height;
             }
@@ -147,7 +167,10 @@ namespace BCRoot
             if (show && title != null)
             {
                 var width = Mathf.Min(safe.width * .62f, 900f * unit);
-                var height = Stack(width, 26f * unit, 10f * unit, (cardTitle, title, 40f * unit), (cardBody, body, 27f * unit), (cardHint, hint, 19f * unit));
+                var portrait = BeaverPortrait ? 112f * unit : 0f;
+                var indent = portrait > 0f ? portrait + 18f * unit : 0f;
+                var height = Mathf.Max(portrait + 52f * unit, Stack(width, 26f * unit, 10f * unit, indent, (cardTitle, title, 40f * unit), (cardBody, body, 27f * unit), (cardHint, hint, 19f * unit)));
+                PlacePortrait(cardPortrait, portrait, 26f * unit);
                 // Just above the middle; below the mirror; the result card sits in the middle.
                 var top = result != null ? Screen.height / 2f + height / 2f : Mathf.Min(safe.yMax - 8f, Screen.height - MirrorBottomOnScreen() - 10f, Screen.height / 2f + height + 6f);
                 cardPanel.anchoredPosition = new Vector2(safe.center.x, top);
@@ -162,12 +185,25 @@ namespace BCRoot
             {
                 var sub = coach.Subtitles && caption.Text != caption.Caption ? caption.Text : null;
                 var width = Mathf.Min(safe.width * .5f, 760f * unit);
-                var height = Stack(width, 14f * unit, 4f * unit, (captionTitle, caption.Caption, 30f * unit), (captionSub, sub, 21f * unit));
+                var portrait = BeaverPortrait ? 52f * unit : 0f;
+                var indent = portrait > 0f ? portrait + 12f * unit : 0f;
+                var height = Mathf.Max(portrait + 28f * unit, Stack(width, 14f * unit, 4f * unit, indent, (captionTitle, caption.Caption, 30f * unit), (captionSub, sub, 21f * unit)));
+                PlacePortrait(captionPortrait, portrait, 14f * unit);
                 var bottom = safe.yMin + Mathf.Max(14f, Mathf.Min(safe.width, safe.height) * .04f);
                 captionPanel.anchoredPosition = new Vector2(safe.center.x - safe.width * .06f, bottom + height);
                 captionPanel.sizeDelta = new Vector2(width, height);
                 captionRim.color = KindColor(caption.Kind);
             }
+
+            // The portrait camera only renders while a portrait is on screen.
+            UpdateBeaver(show && (title != null || caption != null));
+        }
+
+        static void PlacePortrait(RectTransform portrait, float size, float pad)
+        {
+            portrait.gameObject.SetActive(size > 0f);
+            portrait.anchoredPosition = new Vector2(pad, -pad);
+            portrait.sizeDelta = new Vector2(size, size);
         }
     }
 }
