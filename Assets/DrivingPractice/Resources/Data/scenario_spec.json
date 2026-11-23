@@ -1,0 +1,292 @@
+{
+  "_about": "Tuning numbers ported from the web prototype (scenarios.js and engine source; scenario_spec.md). Units: metres, seconds, km/h. u = metres the player's front bumper is past the section start. x = lateral metres: player lane centre 2.1, right curb about 4.15, oncoming lane centre -2.1. Painted guides, highlight zones and hazard rings were removed from the design and are not listed.",
+  "engine": {
+    "gearsKmh": [0, 30, 50, 80],
+    "slowerStepSeconds": 1.0,
+    "fasterStepSeconds": 1.5,
+    "minChangeRateKmhPerSecond": 1.0,
+    "rearEnd": {
+      "_rule": "Tapping Slower while speed > target + toleranceKmh fails rear_ended. During an emergency (ambulance pull-over, hazard step-out) the tap is queued instead.",
+      "toleranceKmh": 0.5
+    },
+    "speedLimit": {
+      "_rule": "Over limit + toleranceKmh for longer than graceSeconds fails speeding. The road limit applies from section start + startOffset (first section: startOffsetFirst) to the next section's start + startOffset.",
+      "toleranceKmh": 0.5,
+      "graceSeconds": 1.5,
+      "startOffset": 20,
+      "startOffsetFirst": -45
+    },
+    "carLengthMetres": 4.4,
+    "pullOverLateralRate": 2.0,
+    "look": {
+      "maxRadians": 1.4,
+      "swipeGain": 2.4,
+      "_swipeGain": "yaw += swipeGain * pixels / focal length",
+      "smoothingRate": 10,
+      "lookedSideDegreesWhileStopped": 20,
+      "lookingAwayDegrees": 25
+    },
+    "nudgeGo": {
+      "_rule": "Stopped longer than stoppedSeconds with no hazard holding, and nothing said for quietSeconds: say nudge_go, repeat every repeatSeconds.",
+      "stoppedSeconds": 7,
+      "quietSeconds": 4,
+      "repeatSeconds": 7
+    },
+    "voiceDelaySeconds": 0.5,
+    "captionSeconds": 4.5,
+    "failCaptionSeconds": 6.0,
+    "signScale": 1.35,
+    "signBottomMetres": 2.0
+  },
+  "modes": {
+    "practice": {
+      "timeLimitSeconds": 300,
+      "coaching": true,
+      "pauseAndExplain": {
+        "pauseKinds": ["cue", "alert", "tip", "info"],
+        "noPauseKinds": ["praise", "go", "fail"],
+        "noPauseLines": ["nudge_go"],
+        "alertDelaySeconds": 0.5
+      }
+    },
+    "finalTest": {
+      "scenarioCount": 5,
+      "calmRoadMetres": 110,
+      "_calmRoad": "about 8 s at 50 km/h before each scenario",
+      "timeLimitSeconds": 900,
+      "_timeLimit": "for the whole test, not per retry",
+      "coaching": false,
+      "spokenKinds": ["fail", "info"],
+      "retries": "unlimited, restart the failed scenario (checkpoint)"
+    },
+    "resultsKept": 20
+  },
+  "scenarios": [
+    {
+      "id": "stop",
+      "unityEnum": "StopSign",
+      "name": "Stop sign",
+      "lengthMetres": 150,
+      "limitKmh": 50,
+      "control": "stop sign at u = stopLine, x 5.4",
+      "stopLine": 95,
+      "stopLineDepth": 0.6,
+      "intersectionCentre": 101,
+      "enteredAfter": 97,
+      "validStop": { "from": 85, "to": 96.5 },
+      "stopLookWithinMetres": 5,
+      "stopTooFar": { "beforeLineMetres": 10, "stoppedSeconds": 1.2 },
+      "cueAt": 20,
+      "hintCar": { "at": 30, "fromSide": "right", "startDistance": 44, "speed": 10.5 },
+      "crossTraffic": {
+        "_rule": "Starts when the player stops. Each car picks a random side. Cars heading right use lane intersectionCentre - 2.5, cars heading left use + 2.5.",
+        "countWeights": [0.4, 0.4, 0.2],
+        "_countWeights": "chance of 1, 2 or 3 cars",
+        "firstCarDistance": { "from": 32, "to": 52 },
+        "laterCarDistance": 70,
+        "laterCarDelay": { "from": 0.5, "to": 3.0 },
+        "lastCarLateChance": 0.4,
+        "lateCarDelay": { "from": 3.0, "to": 4.5 },
+        "speed": 9,
+        "laneOffset": 2.5,
+        "hazardHeight": 1.5
+      },
+      "conflict": {
+        "_rule": "A crossing car conflicts if it overlaps the path strip now, or reaches it before the player's rear clears its lane (at max(speed, 4 m/s)) plus marginSeconds.",
+        "pathX": { "from": 0.6, "to": 3.6 },
+        "marginSeconds": 0.5,
+        "minClearSpeed": 4
+      },
+      "hitCheckUntil": 113,
+      "doneAt": 109,
+      "lines": { "cue": "stop_cue", "look": "stop_look", "early": "stop_early", "tooFar": "stop_toofar", "done": "stop_done", "tip": "stop_tip" },
+      "fails": [
+        { "rule": "u > validStop.to without a full stop", "code": "rolled_stop", "line": "stop_fail_rolled" },
+        { "rule": "u > enteredAfter with a conflicting car", "code": "entered_with_traffic", "line": "stop_fail_traffic" },
+        { "rule": "overlap with a crossing car before hitCheckUntil", "code": "hit_cross_traffic", "line": "stop_fail_hit" }
+      ]
+    },
+    {
+      "id": "hidden_ped",
+      "unityEnum": "HiddenCrossing",
+      "name": "Parked truck",
+      "lengthMetres": 150,
+      "limitKmh": 50,
+      "variants": { "pedestrian": { "chance": 0.5, "speed": 1.5, "hazardHeight": 1.7 }, "dog": { "chance": 0.5, "speed": 1.8, "hazardHeight": 0.8 } },
+      "truck": { "from": 62, "to": 73.5, "xFrom": 4.4, "xTo": 6.8 },
+      "noSceneryRight": { "from": 55, "to": 88 },
+      "stepOutPoint": 75.3,
+      "startX": 5.0,
+      "endX": -6.5,
+      "peek": { "from": 28, "periodSeconds": 2.6, "outSeconds": 0.8, "x": 4.6 },
+      "stepOutWhenWithinMetres": 23.5,
+      "inRoadBelowX": 4.5,
+      "clearAtX": -0.6,
+      "hitCheckBefore": 0.4,
+      "doneAt": 85,
+      "lines": { "cue": "ped_cue", "out": "ped_out", "dog": "ped_dog", "clear": "ped_clear", "dogClear": "ped_dog_clear", "done": "ped_done" },
+      "fails": [
+        { "rule": "front passes stepOutPoint - hitCheckBefore while it is in the road (x < inRoadBelowX, not yet past clearAtX)", "code": "hit_pedestrian / hit_animal", "line": "ped_fail_hit / ped_fail_dog" },
+        { "rule": "same, but the player was already at 30 or below when it stepped out", "code": "hit_pedestrian / hit_animal", "line": "ped_fail_late" }
+      ]
+    },
+    {
+      "id": "school",
+      "unityEnum": "SchoolZone",
+      "name": "School zone",
+      "lengthMetres": 185,
+      "limitKmh": 50,
+      "zone": { "from": 50, "to": 140, "limitKmh": 30, "graceSeconds": 1.0 },
+      "signs": [ { "at": 50, "type": "school zone with 30 km/h tab" }, { "at": 140, "type": "MAXIMUM 50" } ],
+      "signX": 5.4,
+      "noSceneryRight": { "from": 48, "to": 138 },
+      "school": { "from": 72, "to": 112, "xFrom": 11, "xTo": 26 },
+      "sidewalkPeople": { "count": 7, "firstAt": 58, "spacing": 11, "from": 52, "to": 132 },
+      "cueAt": -15,
+      "endAt": 141,
+      "doneAt": 150,
+      "lines": { "cue": "school_cue", "end": "school_end", "done": "school_done" },
+      "fails": [
+        { "rule": "over zone.limitKmh in the zone for longer than zone.graceSeconds", "code": "speeding", "line": "school_fail_speed" }
+      ]
+    },
+    {
+      "id": "playground",
+      "unityEnum": "Playground",
+      "name": "Playground zone",
+      "lengthMetres": 190,
+      "limitKmh": 50,
+      "zone": { "from": 45, "to": 150, "limitKmh": 30, "graceSeconds": 1.0 },
+      "signs": [ { "at": 45, "type": "playground zone with 30 km/h tab" }, { "at": 150, "type": "MAXIMUM 50" } ],
+      "signX": 5.4,
+      "noSceneryLeft": { "from": 40, "to": 125 },
+      "playground": { "from": 62, "to": 108, "xFrom": -18, "xTo": -7 },
+      "crossingPoint": 88,
+      "triggerWithinMetres": 28,
+      "ball": { "startX": -6.0, "speed": 4, "goneAtX": 8, "hazardHeight": 0.5 },
+      "child": {
+        "startX": -13.5, "startBehind": 9, "hazardHeight": 1.2,
+        "startDelaySeconds": 0.7, "runToRoadSpeed": 3, "roadEdgeX": -6.2,
+        "crossSpeed": 2.4, "clearAtX": 4.6, "goneAtX": 7.5
+      },
+      "hitCheckBefore": 0.5,
+      "cueAt": -15,
+      "doneAt": 158,
+      "lines": { "cue": "pg_cue", "ball": "pg_ball", "clear": "pg_clear", "done": "pg_done" },
+      "fails": [
+        { "rule": "front reaches crossingPoint - hitCheckBefore while the child is in the lane (x < child.clearAtX)", "code": "entered_with_child", "line": "pg_fail_child" },
+        { "rule": "over zone.limitKmh in the zone for longer than zone.graceSeconds", "code": "speeding", "line": "pg_fail_speed" }
+      ]
+    },
+    {
+      "id": "lead_car",
+      "unityEnum": "Expressway",
+      "name": "80 zone, car braking",
+      "lengthMetres": 260,
+      "limitKmh": 80,
+      "leadCar": {
+        "startAhead": 70,
+        "startKmh": 60,
+        "_cruise": "Before braking: stays about 45-70 m ahead. Speed = clamp(playerSpeed - (gap - 45) * 0.3 m/s, floor, 80 km/h), floor = clamp(60 - (gap - 55) * 2, 30, 60) km/h.",
+        "cruiseTargetGap": 45,
+        "cruiseGain": 0.3,
+        "floorGapStart": 55,
+        "floorGain": 2,
+        "floorKmh": { "from": 30, "to": 60 },
+        "maxKmh": 80
+      },
+      "brake": {
+        "atU": 110,
+        "orGapAtMost": 32,
+        "dropKmh": 15,
+        "targetKmh": { "from": 20, "to": 50 },
+        "decel": 4,
+        "holdSeconds": 2.2,
+        "waitSeconds": 5,
+        "accel": 2.5,
+        "hazardHeight": 1.5
+      },
+      "removeWhenGapOver": 110,
+      "headway": { "minSeconds": 0.8, "graceSeconds": 1.5, "minPlayerSpeed": 1.4 },
+      "reached80AtKmh": 79,
+      "cueAt": 0,
+      "doneAt": 210,
+      "lines": { "cue": "lead_cue", "brake": "lead_brake", "done": "lead_done", "doneSlow": "lead_done_slow" },
+      "fails": [
+        { "rule": "gap <= 0", "code": "hit_lead_car", "line": "lead_fail_hit" },
+        { "rule": "headway < headway.minSeconds for longer than headway.graceSeconds", "code": "too_close", "line": "lead_fail_close" }
+      ]
+    },
+    {
+      "id": "flashing_red",
+      "unityEnum": "FlashingRed",
+      "name": "Flashing red light",
+      "sameAs": "stop",
+      "_differences": "Flashing red signal over the lane at intersectionCentre + 5 instead of a stop sign, flashing every 1.0 s; own cue, done and rolled lines.",
+      "signalOffset": 5,
+      "flashPeriodSeconds": 1.0,
+      "lines": { "cue": "fr_cue", "look": "stop_look", "early": "stop_early", "tooFar": "stop_toofar", "done": "fr_done", "tip": "stop_tip" },
+      "fails": [
+        { "rule": "u > validStop.to without a full stop", "code": "rolled_flashing_red", "line": "fr_fail_rolled" },
+        { "rule": "u > enteredAfter with a conflicting car", "code": "entered_with_traffic", "line": "stop_fail_traffic" },
+        { "rule": "overlap with a crossing car before hitCheckUntil", "code": "hit_cross_traffic", "line": "stop_fail_hit" }
+      ]
+    },
+    {
+      "id": "ambulance",
+      "unityEnum": "Ambulance",
+      "name": "Ambulance",
+      "lengthMetres": 230,
+      "limitKmh": 50,
+      "spawnAt": 20,
+      "spawnBehind": 95,
+      "closingSpeed": { "abovePlayer": 7, "min": 12 },
+      "_closingSpeed": "ambulance speed m/s = max(playerSpeed + abovePlayer, min) until it passes",
+      "passedSpeed": 25,
+      "ambulanceLength": 6.5,
+      "passedAheadMetres": 8,
+      "goesAroundWithinMetres": 30,
+      "goesAroundX": -0.3,
+      "pullOver": { "from": 70, "to": 135.5, "carX": 3.3, "requiredX": 3.0, "returnX": 2.1 },
+      "flashPeriodSeconds": 0.5,
+      "mirrorShowsWithinMetres": 150,
+      "doneAt": 205,
+      "lines": { "cue": "amb_cue", "passed": "amb_passed", "done": "amb_done" },
+      "fails": [
+        { "rule": "moved after stopping, before it passed", "code": "moved_too_soon", "line": "amb_fail_moved" },
+        { "rule": "past pullOver.to still moving", "code": "did_not_pull_over", "line": "amb_fail_nopull" },
+        { "rule": "ambulance reaches the player's rear with car x < pullOver.requiredX", "code": "blocked_ambulance", "line": "amb_fail_blocked" },
+        { "rule": "ambulance reaches the player's rear while still moving", "code": "not_stopped_for_ambulance", "line": "amb_fail_notstopped" }
+      ]
+    },
+    {
+      "id": "school_bus",
+      "unityEnum": "SchoolBus",
+      "name": "School bus",
+      "lengthMetres": 200,
+      "limitKmh": 50,
+      "bus": {
+        "stopFrontAt": 112,
+        "startAheadOfStop": 41.7,
+        "startSpeed": 13.9,
+        "stopSeconds": 6,
+        "length": 11,
+        "xFrom": -3.35,
+        "xTo": -0.85,
+        "leaveDelaySeconds": 0.8,
+        "leaveAccel": 3,
+        "leaveMaxSpeed": 11,
+        "lightFlashPeriodSeconds": 0.7,
+        "hazardHeight": 3.1
+      },
+      "noPassPoint": 104,
+      "child": { "atBusSeconds": 7.5, "startX": -4.2, "aheadOfBus": -1.6, "speed": 1.3, "clearAtX": 4.6, "goneAtX": 6.3 },
+      "lightsOffAfterClearSeconds": 1.0,
+      "doneAt": 150,
+      "lines": { "cue": "bus_cue", "red": "bus_red", "clear": "bus_clear", "done": "bus_done" },
+      "fails": [
+        { "rule": "front past noPassPoint while lights are on (bus time >= bus.stopSeconds)", "code": "passed_school_bus", "line": "bus_fail" }
+      ]
+    }
+  ]
+}
