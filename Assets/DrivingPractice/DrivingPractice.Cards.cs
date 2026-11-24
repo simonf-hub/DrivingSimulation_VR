@@ -123,6 +123,7 @@ namespace BCRoot
         // LateUpdate: after this frame's driving and coach changes.
         void LateUpdate()
         {
+            UpdateBackdrop(); // DrivingPractice.Backdrop.cs: mountains follow the camera
             if (!cardPanel) return;
             var show = !usingHeadset;
             var safe = Screen.safeArea;

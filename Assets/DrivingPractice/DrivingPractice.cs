@@ -97,6 +97,8 @@ namespace BCRoot
             coach.Attach(voice, prompt);
             playerCarBounds = CarBoundsRelativeTo(vehicle);
             CreateMirror();
+            CreateSideMirrors();
+            ApplyLook(); // DrivingPractice.Sky.cs; before the mountains read the fog colour
             CreateInteriorRoof();
             CreateHud();
             CreatePedals();
@@ -107,7 +109,15 @@ namespace BCRoot
 
         void Start()
         {
+            // The plain street past the end (Editor/StreetDresser.cs) gives way to the next scenario when one follows.
+            ShowStreetPart("Run-out", !ScenarioLauncher.HasFollowingScenario(gameObject.scene.path));
             if (worldStart == 0f) ScenarioLauncher.PreloadFollowing(this);
+        }
+
+        void ShowStreetPart(string part, bool show)
+        {
+            var street = layout ? layout.Find("Streetscape/" + part) : null;
+            if (street) street.gameObject.SetActive(show);
         }
 
         internal void StageForSession(float start)
@@ -125,6 +135,7 @@ namespace BCRoot
 
             // The first scene has a lead-in behind its spawn point. Join later roads at zero.
             if (!layout) return;
+            ShowStreetPart("Run-in", false); // the previous scenario's street is there
             foreach (Transform prop in layout)
             {
                 var position = prop.localPosition;
@@ -150,6 +161,7 @@ namespace BCRoot
 
         internal void EnterSessionSection(DrivingPractice previous)
         {
+            ApplyLook(); // this scene is now the active one, so its lighting settings are the ones in use
             distance = previous.distance - previous.Length;
             vehicle.position = previous.vehicle.position;
             speed = previous.speed;
@@ -209,6 +221,7 @@ namespace BCRoot
             UpdateView(touch.LookDelta, touch.AheadTap || keyboard?.upArrowKey.wasPressedThisFrame == true);
             coach.TiltActive = usingTilt;
             UpdateMirrorAlert();
+            UpdateSideMirrors();
             coach.Tick(Time.unscaledDeltaTime);
             UpdateHud(); // also while a card is up or the result shows, so the HUD is never blank
             var touchEnabled = !usingHeadset;
@@ -530,6 +543,7 @@ namespace BCRoot
         void OnDestroy()
         {
             DestroyMirror();
+            DestroySideMirrors();
             DestroyPedals();
             DestroyBeaver();
             if (headlinerMesh) Destroy(headlinerMesh);
