@@ -15,6 +15,7 @@ namespace BCRoot
 
         const float Lane = 1.85f;
         const float Nose = 2.66f; // front bumper, metres ahead of the player car's origin
+        static readonly Vector3 SeatShift = new(0f, .02f, .10f); // car-local metres: eye now at about (-0.41, 1.21, 0.47)
         static int[] Speeds => PortSpec.Current.engine.gearsKmh;
 
         // scenario_spec.json ids, in Scenario enum order.
@@ -96,6 +97,9 @@ namespace BCRoot
             voice.playOnAwake = false;
             coach.Attach(voice, prompt);
             playerCarBounds = CarBoundsRelativeTo(vehicle);
+            // Eye a little forward and up from the scene's seat: more road over the dashboard and less roof.
+            // Before the mirrors, which aim at the eye. In a headset the tracked head moves relative to this seat.
+            driverView.parent.position += vehicle.TransformDirection(SeatShift);
             CreateMirror();
             CreateSideMirrors();
             ApplyLook(); // DrivingPractice.Sky.cs; before the mountains read the fog colour

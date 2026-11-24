@@ -5,8 +5,9 @@ using UnityEngine;
 
 namespace BCRoot.EditorTools
 {
-    // Dresses the open scenario scene as a BC residential street (BC Roots > Dress street).
-    // Cross-section per side, from the road edge out (after City of Vancouver drawings R2.1 / C1.1):
+    // Dresses the open scenario scene as a BC street (BC Roots > Dress street). The scene's name picks the street type
+    // (StreetFor): residential (default), commercial (high street: Kazama's city buildings) or rural (edge of town).
+    // Residential cross-section per side, from the road edge out (after City of Vancouver drawings R2.1 / C1.1):
     // 0.15 m concrete curb, 2 m planted strip (street trees, lights, power poles), 1.8 m sidewalk, then 11 m wide lots
     // about 37 m deep (front yard, house, back yard), a 6 m back lane, and the next street's houses backing onto it.
     // Reads "Road", "Cross street" and "Ground" under "Scenario layout"; never moves scenario landmarks.
@@ -33,6 +34,10 @@ namespace BCRoot.EditorTools
         const float PoleHeight = 11.6f;
 
         static readonly string[] OldDressing = { "Sidewalk", "Tree trunk", "Tree canopy" };
+        // Layout children that are surfaces or markings, not landmarks. Everything else (vehicles, people, signs,
+        // fences, the ball...) is a scenario landmark: nothing tall is placed near it.
+        static readonly string[] NotLandmarks = { "Road", "Ground", "Cross street", "Centre marking", RootName };
+        const float KeepOutAlong = 3f, KeepOutAcross = 1.5f;
 
         sealed class Cross { public float zMin, zMax; }
 
@@ -43,11 +48,21 @@ namespace BCRoot.EditorTools
         static float roadHalf, zStart, zEnd, mainEnd, groundHalf;
         static string lastHouse;
         static readonly List<Cross> crosses = new();
+        static readonly List<Bounds> keepOut = new();
         static readonly Dictionary<string, GameObject> models = new();
         static readonly List<(string name, float width)> houses = new(); // width along the street when facing it
 
-        [MenuItem("BC Roots/Dress street (residential)")]
-        static void DressResidential()
+        static string street;
+
+        static string StreetFor(string scene) => scene switch
+        {
+            "FlashingRed" or "Ambulance" => "commercial",
+            "Expressway" => "rural",
+            _ => "residential"
+        };
+
+        [MenuItem("BC Roots/Dress street")]
+        static void Dress()
         {
             var scene = EditorSceneManager.GetActiveScene();
             if (Application.isPlaying)
@@ -55,7 +70,9 @@ namespace BCRoot.EditorTools
                 EditorUtility.DisplayDialog("Dress street", "Stop Play mode first.", "OK");
                 return;
             }
-            var layoutRoot = GameObject.Find("Scenario layout");
+            GameObject layoutRoot = null; // the active scene's, so several scenes can be open at once
+            foreach (var r in scene.GetRootGameObjects())
+                if (r.name == "Scenario layout") layoutRoot = r;
             if (!layoutRoot || layoutRoot.transform.childCount == 0)
             {
                 Debug.LogError("Dress street: no 'Scenario layout' in the open scene.");
@@ -74,6 +91,8 @@ namespace BCRoot.EditorTools
             var undoGroup = Undo.GetCurrentGroup();
             rng = new System.Random(scene.name.GetHashCode() & 0x7fffffff);
             lastHouse = null;
+            reserved = ReservedFor(scene.name);
+            street = StreetFor(scene.name);
             LoadAssets();
 
             var roadBounds = Bounds(road);
@@ -105,6 +124,15 @@ namespace BCRoot.EditorTools
                 if (System.Array.IndexOf(OldDressing, child.name) >= 0 || child.name.StartsWith("building-")) old.Add(child.gameObject);
             foreach (var go in old) Undo.DestroyObjectImmediate(go);
 
+            keepOut.Clear();
+            foreach (Transform child in layout)
+            {
+                if (System.Array.IndexOf(NotLandmarks, child.name) >= 0) continue;
+                var b = Bounds(child);
+                b.Expand(new Vector3(KeepOutAcross * 2f, 0f, KeepOutAlong * 2f));
+                keepOut.Add(b);
+            }
+
             var previous = layout.Find(RootName);
             if (previous) Undo.DestroyObjectImmediate(previous.gameObject);
             root = new GameObject(RootName).transform;
@@ -118,8 +146,17 @@ namespace BCRoot.EditorTools
             groupPoles = Group("Power poles");
 
             BuildExtensions(road, ground, layout);
-            BuildMainRoad();
-            BuildCrossStreets();
+            if (street == "commercial")
+            {
+                BuildHighStreet();
+                BuildCommercialCrossStreets();
+            }
+            else if (street == "rural") BuildRural();
+            else
+            {
+                BuildMainRoad();
+                BuildCrossStreets();
+            }
             var summary = $"{groupHouses.childCount} houses, {groupTrees.childCount} trees, {groupYards.childCount} yard pieces, " +
                           $"{groupLights.childCount} lights, {groupPoles.childCount} pole parts";
             SortIntoParts();
@@ -213,7 +250,8 @@ namespace BCRoot.EditorTools
                 {
                     StripAlongZ(side, roadHalf, CurbWidth, CurbHeight, from, to, concrete, "Curb");
                     StripAlongZ(side, roadHalf + CurbWidth, Boulevard, CurbHeight - .02f, from, to, grass, "Planted strip");
-                    StripAlongZ(side, roadHalf + CurbWidth + Boulevard, SidewalkWidth, CurbHeight, from, to, concrete, "Sidewalk");
+                    foreach (var (a, b) in Without(from, to, side == reserved?.side ? reserved.noSidewalk : default))
+                        StripAlongZ(side, roadHalf + CurbWidth + Boulevard, SidewalkWidth, CurbHeight, a, b, concrete, "Sidewalk");
                 }
 
                 var treeX = side * (roadHalf + CurbWidth + Boulevard * .5f);
@@ -229,16 +267,17 @@ namespace BCRoot.EditorTools
                 else
                     PowerLine(-(roadHalf + CurbWidth + Boulevard - .4f));
 
-                // Front row: lots facing the road.
+                // Front row: lots facing the road (none along a school or park).
                 foreach (var (from, to) in MainRoadSpans(Strip + 1f, ClearZone))
                     for (var z = from; z + LotLength <= to + .01f; z += LotLength)
-                        FrontLot(side, z + LotLength * .5f, frontLine);
+                        if (!IsReserved(side, z, z + LotLength)) FrontLot(side, z + LotLength * .5f, frontLine);
 
                 // Back yards, the back lane, and the next street's houses backing onto it, away from cross streets.
                 foreach (var (from, to) in MainRoadSpans(30f, 30f))
                 {
                     for (var z = from; z + LotLength <= to + .01f; z += LotLength)
                     {
+                        if (IsReserved(side, z, z + LotLength)) continue;
                         var along = z + LotLength * .5f;
                         for (var n = BackyardTrees + (float)rng.NextDouble() - .5f; n >= 1f; n--)
                             Tree(new Vector3(side * (frontLine + LotDepth * .72f + Jitter(5f)), 0f, along + Jitter(4f)), RandomTree());
@@ -247,9 +286,361 @@ namespace BCRoot.EditorTools
                         House(side, along, rearLine + LaneWidth + 6f + Jitter(1f), faceAlongX: true, faceAway: true);
                     }
                     for (var z = from; z + 3.3f <= to; z += 3.4f)
-                        Yard("Suburban/fence", new Vector3(side * rearLine, 0f, z + 1.7f), 90f); // rear fences along the lane
+                        if (!IsReserved(side, z, z + 3.4f))
+                            Yard("Suburban/fence", new Vector3(side * rearLine, 0f, z + 1.7f), 90f); // rear fences along the lane
                 }
             }
+            if (reserved?.kind == "school") BuildSchoolGrounds(frontLine);
+            if (reserved?.kind == "park") BuildPark(frontLine);
+        }
+
+        // ---------- commercial: high street with Kazama's city buildings ----------
+        // 0.15 m curb, 3.5 m sidewalk with street trees in grates and lights, buildings right at the back of the
+        // sidewalk, a taller second row behind, and low-detail towers further out for a skyline. No power poles
+        // (wires run underground downtown). The approach corners stop at the sight-triangle clear zone (a small plaza).
+
+        const float WideSidewalk = 3.5f, CommercialStrip = CurbWidth + WideSidewalk;
+        const float CommercialTreeSpacing = 10f, CommercialLightSpacing = 25f;
+        static readonly (float from, float to) PullOver = (70f, 136f); // ambulance: kept free of sidewalk furniture
+
+        sealed class CityPiece { public Mesh mesh; public Material[] materials; public Quaternion rotation; public Vector3 scale; }
+        static Dictionary<string, CityPiece> cityPieces;
+
+        static void BuildHighStreet()
+        {
+            var front = roadHalf + CommercialStrip;
+            foreach (var side in new[] { -1, 1 })
+            {
+                foreach (var (from, to) in MainRoadSpans(CommercialStrip))
+                {
+                    StripAlongZ(side, roadHalf, CurbWidth, CurbHeight, from, to, concrete, "Curb");
+                    StripAlongZ(side, roadHalf + CurbWidth, WideSidewalk, CurbHeight, from, to, concrete, "Sidewalk");
+                }
+                foreach (var (from, to) in MainRoadSpans(CommercialStrip + 1f, ClearZone))
+                {
+                    for (var z = from + 4f; z < to - 2f; z += CommercialTreeSpacing)
+                        StreetTree(new Vector3(side * (roadHalf + 1.3f), 0f, z + Jitter(1f)));
+                    for (var z = from + 9f; z < to - 2f; z += CommercialLightSpacing)
+                        Light(new Vector3(side * (roadHalf + CurbWidth + .4f), 0f, z), side > 0 ? 90f : -90f);
+                    if (street == "commercial" && SceneName() == "Ambulance")
+                        for (var z = from + 6f; z < to - 3f; z += 12f)
+                            if (rng.NextDouble() < .35 && (z < PullOver.from || z > PullOver.to))
+                                CityDetail(rng.NextDouble() < .5 ? "detail-parasol-a" : "detail-parasol-b",
+                                    new Vector3(side * (roadHalf + CurbWidth + 2.6f), CurbHeight, z), 0f);
+                    BuildingRow(side, front, from, to, "front");
+                }
+                foreach (var (from, to) in MainRoadSpans(30f, 30f))
+                    BuildingRow(side, front + 16f, from, to, "tall");
+                for (var z = zStart + 10f; z < zEnd; z += 24f)
+                    CityBuilding(LowDetail(), side, z + Jitter(6f), 48f + (float)rng.NextDouble() * 18f, faceAway: false, allowAnyWidth: true);
+            }
+        }
+
+        // Cross streets on the high street: curb and wide sidewalk, buildings fronting the cross street beyond the
+        // main street's corner buildings. On the approach side they stand back to the clear-zone line.
+        static void BuildCommercialCrossStreets()
+        {
+            foreach (var c in crosses)
+                foreach (var side in new[] { -1, 1 })
+                {
+                    var edge = side < 0 ? c.zMin : c.zMax;
+                    foreach (var xs in new[] { -1, 1 })
+                    {
+                        StripAlongX(xs, edge, side, 0f, CurbWidth, CurbHeight, concrete, "Curb");
+                        StripAlongX(xs, edge, side, CurbWidth, WideSidewalk, CurbHeight, concrete, "Sidewalk");
+                        var near = side < 0 ? ClearZone + .5f : CommercialStrip;
+                        for (var x = 30f; x < groundHalf - 6f;)
+                        {
+                            var width = CityBuilding(FrontPiece(), side, xs * (x + 6f), near, faceAway: false, alongX: true, crossEdge: edge);
+                            x += Mathf.Max(width, 6f) + .6f;
+                        }
+                        if (side > 0)
+                            for (var x = roadHalf + CommercialStrip + 4f; x < groundHalf - 2f; x += CommercialTreeSpacing)
+                                StreetTree(new Vector3(xs * x, 0f, edge + 1.3f));
+                    }
+                }
+        }
+
+        // Buildings packed along the street between from and to: "front" (shops at the sidewalk, some with awnings)
+        // or "tall" (the row behind, taller).
+        static void BuildingRow(int side, float near, float from, float to, string row)
+        {
+            var z = from + .5f;
+            while (z < to - 4f)
+            {
+                var piece = row == "front" ? FrontPiece() : TallPiece();
+                var go = MakeCityPiece(piece, groupHouses);
+                go.transform.rotation = Quaternion.Euler(0f, side < 0 ? -90f : 90f, 0f) * cityPieces[piece].rotation;
+                var b = Bounds(go.transform);
+                var width = b.size.z;
+                if (z + width > to) { Object.DestroyImmediate(go); break; }
+                var nearEdge = side < 0 ? b.max.x : b.min.x;
+                go.transform.position += new Vector3(side * near - nearEdge, 0f, z + width * .5f - b.center.z);
+                var placed = Bounds(go.transform);
+                if (BlocksSightline(placed)) Object.DestroyImmediate(go);
+                else if (row == "front" && rng.NextDouble() < .4 && width > 5f)
+                    CityDetail(width > 8f ? "detail-overhang-wide" : "detail-awning",
+                        new Vector3(side * (near + .05f), 0f, placed.center.z), side < 0 ? -90f : 90f);
+                z += width + .3f + (float)rng.NextDouble() * (row == "front" ? .6f : 5f);
+            }
+        }
+
+        // One city building facing a street; returns its width along that street (0 if dropped).
+        static float CityBuilding(string piece, int side, float along, float near, bool faceAway, bool alongX = false, float crossEdge = 0f, bool allowAnyWidth = false)
+        {
+            var go = MakeCityPiece(piece, groupHouses);
+            float yaw = alongX ? (side < 0 ? 180f : 0f) : (side < 0 ? -90f : 90f);
+            if (faceAway) yaw += 180f;
+            go.transform.rotation = Quaternion.Euler(0f, yaw, 0f) * cityPieces[piece].rotation;
+            var b = Bounds(go.transform);
+            float width;
+            if (!alongX)
+            {
+                var nearEdge = side < 0 ? b.max.x : b.min.x;
+                go.transform.position += new Vector3(side * near - nearEdge, 0f, along - b.center.z);
+                width = b.size.z;
+            }
+            else
+            {
+                var nearEdge = side < 0 ? b.max.z : b.min.z;
+                go.transform.position += new Vector3(along - b.center.x, 0f, crossEdge + side * near - nearEdge);
+                width = b.size.x;
+            }
+            if (!BlocksSightline(Bounds(go.transform))) return width;
+            Object.DestroyImmediate(go);
+            return 0f;
+        }
+
+        // Kazama's city models (after their FBX rotation) face -z, hence the yaws in CityBuilding/BuildingRow: storefronts face the street.
+        static GameObject MakeCityPiece(string name, Transform parent)
+        {
+            var piece = cityPieces[name];
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localScale = piece.scale;
+            go.AddComponent<MeshFilter>().sharedMesh = piece.mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterials = piece.materials;
+            return go;
+        }
+
+        static void CityDetail(string name, Vector3 position, float yaw)
+        {
+            if (!cityPieces.ContainsKey(name)) return;
+            var go = MakeCityPiece(name, groupYards);
+            go.transform.rotation = Quaternion.Euler(0f, yaw, 0f) * cityPieces[name].rotation;
+            var b = Bounds(go.transform);
+            go.transform.position += new Vector3(position.x - b.center.x, position.y - b.min.y, position.z - b.center.z);
+            if (BlocksSightline(Bounds(go.transform))) Object.DestroyImmediate(go);
+        }
+
+        static void StreetTree(Vector3 position)
+        {
+            Box("Tree grate", position + new Vector3(0f, CurbHeight + .005f, 0f), new Vector3(1.1f, .01f, 1.1f), wire);
+            Tree(position + new Vector3(0f, CurbHeight, 0f), rng.NextDouble() < .5 ? "tree-large" : "tree-small");
+        }
+
+        static string FrontPiece() => PickCity(n => n.StartsWith("building-") && !n.Contains("skyscraper") && !n.StartsWith("building-m") && !n.StartsWith("building-l") && !n.StartsWith("building-n"));
+        static string TallPiece() => PickCity(n => n.Contains("skyscraper") || n.StartsWith("building-m") || n.StartsWith("building-l") || n.StartsWith("building-n"));
+        static string LowDetail() => PickCity(n => n.StartsWith("low-detail-"));
+
+        static string PickCity(System.Func<string, bool> match)
+        {
+            var list = new List<string>();
+            foreach (var name in cityPieces.Keys) if (match(name)) list.Add(name);
+            return list[rng.Next(list.Count)];
+        }
+
+        // One of each building in Kazama's city model (Separated Assets/Driving_Sim_Model_City.fbx), by base name.
+        static void LoadCityPieces()
+        {
+            if (cityPieces != null) return;
+            cityPieces = new Dictionary<string, CityPiece>();
+            var city = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Separated Assets/Driving_Sim_Model_City.fbx");
+            // The FBX's own "colormap" materials have no texture; the scenes use these textured copies.
+            var colormap = AssetDatabase.LoadAssetAtPath<Material>("Assets/Prefabs/Materials/City_colormap.mat");
+            foreach (var r in city.GetComponentsInChildren<MeshRenderer>(true))
+            {
+                var mesh = r.GetComponent<MeshFilter>().sharedMesh;
+                var name = System.Text.RegularExpressions.Regex.Replace(mesh.name, @"\d+$", "");
+                if (!(name.StartsWith("building-") || name.StartsWith("low-detail-") || name.StartsWith("detail-")) || cityPieces.ContainsKey(name)) continue;
+                var materials = r.sharedMaterials;
+                for (var i = 0; i < materials.Length; i++)
+                    if (colormap && materials[i] && materials[i].name.StartsWith("colormap")) materials[i] = colormap;
+                cityPieces[name] = new CityPiece
+                {
+                    mesh = mesh, materials = materials,
+                    rotation = Quaternion.Inverse(city.transform.rotation) * r.transform.rotation,
+                    scale = r.transform.lossyScale
+                };
+            }
+        }
+
+        static string SceneName() => root.gameObject.scene.name;
+
+        // ---------- rural: edge of town (80 km/h) ----------
+        // Gravel shoulders, grass verges, farm fences, a few houses set well back with gravel driveways and trees
+        // around them, a forest edge further out, and a power line along one side. No curbs, sidewalks or lights.
+
+        const float Shoulder = 1.5f, FenceLine = 11f, FarmSpacing = 90f;
+
+        static void BuildRural()
+        {
+            var gravel = PlaceholderMaterial("Gravel", new Color(.58f, .55f, .5f));
+            foreach (var side in new[] { -1, 1 })
+            {
+                foreach (var (from, to) in MainRoadSpans(0f))
+                    StripAlongZ(side, roadHalf, Shoulder, .02f, from, to, gravel, "Gravel shoulder");
+                if (side < 0) PowerLine(-(roadHalf + Shoulder + 2.5f));
+
+                foreach (var (from, to) in MainRoadSpans(0f))
+                {
+                    // Farm fence, with gaps at driveways.
+                    var drives = new List<float>();
+                    for (var z = from + 20f + (side > 0 ? 40f : 0f); z < to - 15f; z += FarmSpacing + Jitter(20f)) drives.Add(z);
+                    for (var z = from; z + 3.4f <= to; z += 3.4f)
+                    {
+                        var nearDrive = false;
+                        foreach (var d in drives) if (Mathf.Abs(z + 1.7f - d) < 3f) nearDrive = true;
+                        if (!nearDrive) Yard("Suburban/fence", new Vector3(side * FenceLine, 0f, z + 1.7f), 90f, new Vector3(1f, .45f, .6f));
+                    }
+                    foreach (var d in drives)
+                    {
+                        var setback = 24f + (float)rng.NextDouble() * 18f;
+                        Box("Gravel driveway", new Vector3(side * (roadHalf + Shoulder + setback * .5f), .01f, d), new Vector3(setback, .02f, 3f), gravel);
+                        House(side, d + (rng.NextDouble() < .5 ? -9f : 9f), roadHalf + Shoulder + setback - 4f, faceAlongX: true);
+                        for (var n = 0; n < 4; n++)
+                            Tree(new Vector3(side * (roadHalf + setback + 10f + Jitter(8f)), 0f, d + Jitter(14f)), RandomTree());
+                    }
+                    // Forest edge, and the odd lone tree in the fields.
+                    for (var z = from; z < to; z += 5f)
+                        Tree(new Vector3(side * (56f + Jitter(6f)), 0f, z + Jitter(2f)), RandomTree());
+                    for (var z = from + 8f; z < to; z += 30f)
+                        if (rng.NextDouble() < .5) Tree(new Vector3(side * (15f + (float)rng.NextDouble() * 20f), 0f, z + Jitter(8f)), "tree-large");
+                }
+            }
+        }
+
+        // ---------- reserved sides: school grounds and park (scenario_spec.json noSceneryRight / noSceneryLeft) ----------
+
+        sealed class Reserved
+        {
+            public int side;
+            public float from, to;
+            public string kind;
+            public (float from, float to) noSidewalk;
+        }
+
+        static Reserved reserved;
+
+        static Reserved ReservedFor(string scene) => scene switch
+        {
+            "SchoolZone" => new Reserved { side = 1, from = 48f, to = 138f, kind = "school" },
+            // The play-area fence stands in the planted strip, so the park edge has no sidewalk (a sidewalk would be inside the fence).
+            "Playground" => new Reserved { side = -1, from = 40f, to = 125f, kind = "park", noSidewalk = (60f, 110f) },
+            _ => null
+        };
+
+        static bool IsReserved(int side, float from, float to) =>
+            reserved != null && side == reserved.side && to > reserved.from && from < reserved.to;
+
+        static IEnumerable<(float from, float to)> Without(float from, float to, (float from, float to) cut)
+        {
+            if (cut.to <= cut.from || cut.to <= from || cut.from >= to)
+            {
+                yield return (from, to);
+                yield break;
+            }
+            if (cut.from > from) yield return (from, cut.from);
+            if (cut.to < to) yield return (cut.to, to);
+        }
+
+        // School grounds: lawn (the ground), a low fence along the back of the sidewalk with a gap at the school's
+        // entrance, and a row of trees at the back. Kazama's school building ("School") stays where the scene has it.
+        static void BuildSchoolGrounds(float frontLine)
+        {
+            var side = reserved.side;
+            var school = root.parent.Find("School");
+            var entrance = school ? Bounds(school).center.z : (reserved.from + reserved.to) * .5f;
+            for (var z = reserved.from; z + 3.4f <= reserved.to; z += 3.4f)
+            {
+                if (Mathf.Abs(z + 1.7f - entrance) < 4f) continue;
+                Yard("Suburban/fence", new Vector3(side * (frontLine + .4f), 0f, z + 1.7f), 90f, new Vector3(1f, .5f, 1f));
+            }
+            for (var z = reserved.from + 3f; z < reserved.to - 2f; z += 9f)
+                Tree(new Vector3(side * (36f + Jitter(4f)), 0f, z + Jitter(2f)), "tree-large");
+        }
+
+        // Park: open lawn (the ground), trees around the edges away from the child's run to the road, a sand patch,
+        // and a simple swing set and slide built from basic shapes (placeholders until the artist's models arrive).
+        static void BuildPark(float frontLine)
+        {
+            var side = reserved.side;
+            for (var z = reserved.from + 2f; z < reserved.to - 1f; z += 8f)
+                Tree(new Vector3(side * (24f + Jitter(4f)), 0f, z + Jitter(2f)), RandomTree());
+            foreach (var z in new[] { 44f, 52f, 114f, 121f })
+                Tree(new Vector3(side * (11f + Jitter(3f)), 0f, z + Jitter(1.5f)), RandomTree());
+
+            var sand = PlaceholderMaterial("Sand", new Color(.86f, .78f, .58f));
+            var red = PlaceholderMaterial("Play red", new Color(.85f, .22f, .18f));
+            var yellow = PlaceholderMaterial("Play yellow", new Color(.98f, .78f, .2f));
+            var steel = PlaceholderMaterial("Play steel", new Color(.55f, .58f, .62f));
+            var group = new GameObject("Play equipment (placeholder)").transform;
+            group.SetParent(groupYards, false);
+
+            // Sand patch under the slide, at the far end of the play area from the child's start.
+            Prim(group, PrimitiveType.Cube, "Sand", new Vector3(side * 12.5f, .02f, 100f), new Vector3(8f, .04f, 11f), Vector3.zero, sand);
+
+            // Swing set: two A-frames joined by a top bar, two seats on chains.
+            var swing = new Vector3(side * 14f, 0f, 68f);
+            foreach (var dz in new[] { -1.9f, 1.9f })
+            foreach (var lean in new[] { -12f, 12f })
+                Prim(group, PrimitiveType.Cylinder, "Swing leg", swing + new Vector3(Mathf.Sin(lean * Mathf.Deg2Rad) * 1.2f, 1.2f, dz),
+                    new Vector3(.08f, 1.24f, .08f), new Vector3(0f, 0f, lean), red);
+            Prim(group, PrimitiveType.Cylinder, "Swing bar", swing + new Vector3(0f, 2.4f, 0f), new Vector3(.08f, 1.95f, .08f), new Vector3(90f, 0f, 0f), red);
+            foreach (var dz in new[] { -.8f, .8f })
+            {
+                foreach (var dx in new[] { -.2f, .2f })
+                    Prim(group, PrimitiveType.Cylinder, "Chain", swing + new Vector3(dx, 1.6f, dz), new Vector3(.02f, .8f, .02f), Vector3.zero, steel);
+                Prim(group, PrimitiveType.Cube, "Seat", swing + new Vector3(0f, .8f, dz), new Vector3(.5f, .05f, .2f), Vector3.zero, yellow);
+            }
+
+            // Slide: ladder up to a platform, chute down toward the road side of the sand.
+            var slide = new Vector3(side * 13.5f, 0f, 101f);
+            foreach (var dz in new[] { -.3f, .3f })
+                Prim(group, PrimitiveType.Cube, "Ladder rail", slide + new Vector3(side * -.9f, .9f, dz), new Vector3(.06f, 1.8f, .06f), Vector3.zero, steel);
+            for (var y = .3f; y < 1.7f; y += .35f)
+                Prim(group, PrimitiveType.Cube, "Rung", slide + new Vector3(side * -.9f, y, 0f), new Vector3(.05f, .04f, .6f), Vector3.zero, steel);
+            Prim(group, PrimitiveType.Cube, "Platform", slide + new Vector3(side * -.5f, 1.6f, 0f), new Vector3(.8f, .08f, .8f), Vector3.zero, red);
+            var chuteLength = 2.8f;
+            Prim(group, PrimitiveType.Cube, "Chute", slide + new Vector3(side * .95f, .85f, 0f), new Vector3(chuteLength, .06f, .6f),
+                new Vector3(0f, 0f, side * -32f), yellow);
+        }
+
+        static void Prim(Transform parent, PrimitiveType shape, string name, Vector3 position, Vector3 scale, Vector3 euler, Material mat)
+        {
+            var go = GameObject.CreatePrimitive(shape);
+            Object.DestroyImmediate(go.GetComponent<Collider>());
+            go.name = name;
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = position;
+            go.transform.localRotation = Quaternion.Euler(euler);
+            go.transform.localScale = scale;
+            go.GetComponent<MeshRenderer>().sharedMaterial = mat;
+        }
+
+        // A plain URP Lit material saved under Art/Placeholders/Materials (created once, then reused).
+        static Material PlaceholderMaterial(string name, Color color)
+        {
+            const string folder = Art + "Placeholders/Materials";
+            var path = folder + "/" + name + ".mat";
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat) return mat;
+            if (!AssetDatabase.IsValidFolder(Art + "Placeholders")) AssetDatabase.CreateFolder(Art.TrimEnd('/'), "Placeholders");
+            if (!AssetDatabase.IsValidFolder(folder)) AssetDatabase.CreateFolder(Art + "Placeholders", "Materials");
+            mat = new Material(Shader.Find("Universal Render Pipeline/Lit")) { color = color };
+            mat.SetFloat("_Smoothness", .2f);
+            AssetDatabase.CreateAsset(mat, path);
+            return mat;
         }
 
         // One front lot: house set back from the sidewalk, a path to the door, sometimes a low hedge along the front.
@@ -395,11 +786,12 @@ namespace BCRoot.EditorTools
             return lastHouse = name;
         }
 
-        static void Yard(string model, Vector3 position, float yaw)
+        static void Yard(string model, Vector3 position, float yaw, Vector3? scale = null)
         {
             var go = Spawn(Model(model), groupYards);
             go.transform.localPosition = position;
             go.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
+            go.transform.localScale = scale ?? Vector3.one;
             if (BlocksSightline(Bounds(go.transform))) Object.DestroyImmediate(go);
         }
 
@@ -421,6 +813,7 @@ namespace BCRoot.EditorTools
             var go = Spawn(Model("Streets/light-curved"), groupLights);
             go.transform.localPosition = position;
             go.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
+            if (BlocksSightline(Bounds(go.transform))) Object.DestroyImmediate(go);
         }
 
         // Wooden poles in the planted strip, joined by two sagless wires near the top.
@@ -430,7 +823,8 @@ namespace BCRoot.EditorTools
             foreach (var (from, to) in MainRoadSpans(Strip + 1f, ClearZone))
             {
                 poles.Clear();
-                for (var z = from + 6f; z < to - 2f; z += PoleSpacing) poles.Add(new Vector3(x, 0f, z));
+                for (var z = from + 6f; z < to - 2f; z += PoleSpacing)
+                    if (!BlocksSightline(new Bounds(new Vector3(x, 6f, z), new Vector3(1f, 12f, 1f)))) poles.Add(new Vector3(x, 0f, z));
                 foreach (var p in poles)
                 {
                     var go = Spawn(Model("Streets/electricity-pole-single"), groupPoles);
@@ -438,6 +832,7 @@ namespace BCRoot.EditorTools
                     go.transform.localRotation = Quaternion.Euler(0f, 90f, 0f); // cross-arm across the road
                 }
                 for (var i = 1; i < poles.Count; i++)
+                    if (poles[i].z - poles[i - 1].z < PoleSpacing + 1f) // no wire across a gap where a pole was left out
                     foreach (var offset in new[] { -.8f, .8f })
                         Wire(poles[i - 1] + new Vector3(offset, PoleHeight - .6f, 0f), poles[i] + new Vector3(offset, PoleHeight - .6f, 0f));
             }
@@ -459,11 +854,16 @@ namespace BCRoot.EditorTools
 
         // ---------- helpers ----------
 
-        // Things taller than the ground may not stand in the last ClearZone metres before a cross street, beyond the road edge.
+        // Things taller than the ground may not stand in the last ClearZone metres before a cross street, beyond the
+        // road edge, nor near a scenario landmark (so no tree hides or frames a hazard differently than the scenario intends).
         static bool BlocksSightline(Bounds b)
         {
+            if (b.max.y <= .3f) return false;
             foreach (var c in crosses)
-                if (b.max.z > c.zMin - ClearZone && b.min.z < c.zMin && (b.max.x > roadHalf || b.min.x < -roadHalf) && b.max.y > .3f)
+                if (b.max.z > c.zMin - ClearZone && b.min.z < c.zMin && (b.max.x > roadHalf || b.min.x < -roadHalf))
+                    return true;
+            foreach (var k in keepOut)
+                if (b.max.x > k.min.x && b.min.x < k.max.x && b.max.z > k.min.z && b.min.z < k.max.z)
                     return true;
             return false;
         }
@@ -500,6 +900,8 @@ namespace BCRoot.EditorTools
                 AssetDatabase.LoadAssetAtPath<Material>(Art + "Suburban/Materials/House_B.mat"),
                 AssetDatabase.LoadAssetAtPath<Material>(Art + "Suburban/Materials/House_C.mat")
             };
+
+            LoadCityPieces();
 
             // Houses that fit an 11 m lot with a gap to the neighbours (width = model x, along the street when facing it).
             houses.Clear();

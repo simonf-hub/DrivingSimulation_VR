@@ -154,6 +154,8 @@ namespace BCRoot
                 }
                 else
                 {
+                    // shortcut: Retry after a pass stands in for the prototype's "try again or pick another" practice
+                    // menu; replace it when the practice list is built (step 6, practice and final test flow).
                     (title, body, kind) = ("You passed!", "Well done. You can drive it again for practice.", "praise");
                     hint = "Tap Retry to drive it again";
                 }
