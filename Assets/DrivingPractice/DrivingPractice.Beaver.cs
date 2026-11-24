@@ -25,7 +25,7 @@ namespace BCRoot
         PlayableGraph nodGraph;
         AnimationClipPlayable nod;
         float nodLength;
-        bool wasSpeaking;
+        int nodLines;
 
         internal Texture BeaverPortrait => portraitTexture;
 
@@ -85,11 +85,11 @@ namespace BCRoot
             if (!beaver) return;
             portraitCamera.enabled = showPortrait && !usingHeadset;
 
-            // Nod once as each line starts; back to the rest pose when the clip ends.
-            var speaking = coach.Speaking;
+            // Nod once as each voiced line starts (not on chimes); back to the rest pose when the clip ends.
+            var lines = coach.LinesStarted;
             if (nodGraph.IsValid())
             {
-                if (speaking && !wasSpeaking)
+                if (lines != nodLines)
                 {
                     nod.SetTime(0d);
                     nod.Play();
@@ -100,7 +100,7 @@ namespace BCRoot
                     nod.Pause();
                 }
             }
-            wasSpeaking = speaking;
+            nodLines = lines;
 
             var breathe = 1f + Mathf.Sin(Time.unscaledTime * 1.6f) * .008f;
             beaver.localScale = Vector3.Scale(beaverBaseScale, new Vector3(1f, breathe, 1f));

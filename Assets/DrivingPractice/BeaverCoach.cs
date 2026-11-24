@@ -29,7 +29,8 @@ namespace BCRoot
         // What to draw (DrivingPractice.Cards.cs): the pause-and-explain card, else the short caption near the road.
         internal Line Card => card;
         internal Line Caption => caption;
-        internal bool Speaking => voice && voice.isPlaying;
+        // Counts voiced lines as they start (not chimes), so the beaver can nod once per line, even back to back.
+        internal int LinesStarted { get; private set; }
 
         readonly Queue<Line> cardQueue = new();
         Line card, caption, pendingVoice, pendingAlert;
@@ -188,6 +189,7 @@ namespace BCRoot
             voice.Stop();
             voice.clip = clip;
             voice.Play();
+            LinesStarted++;
             return true;
         }
 

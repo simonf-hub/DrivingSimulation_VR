@@ -1,5 +1,8 @@
 using System;
+using System.Runtime.CompilerServices;
 using UnityEngine;
+
+[assembly: InternalsVisibleTo("Assembly-CSharp-Editor")] // Editor/StreetDresser.cs reads the spec's scenery ranges
 
 namespace BCRoot
 {
@@ -24,6 +27,8 @@ namespace BCRoot
         internal sealed class ScenarioSpec
         {
             public string id;
+            public string unityEnum; // the scenario's scene name
+            public Range noSceneryLeft, noSceneryRight, playground; // street dressing (Editor/StreetDresser.cs)
             public float lengthMetres;
             public float limitKmh;
             public float stopLine, intersectionCentre, enteredAfter, stopLookWithinMetres, cueAt, hitCheckUntil, doneAt;

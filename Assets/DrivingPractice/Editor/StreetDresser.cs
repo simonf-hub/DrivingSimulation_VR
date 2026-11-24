@@ -91,7 +91,9 @@ namespace BCRoot.EditorTools
             var undoGroup = Undo.GetCurrentGroup();
             rng = new System.Random(scene.name.GetHashCode() & 0x7fffffff);
             lastHouse = null;
-            reserved = ReservedFor(scene.name);
+            var spec = SpecFor(scene.name);
+            reserved = ReservedFor(spec);
+            pullOver = spec?.pullOver != null && spec.pullOver.to > 0f ? (spec.pullOver.from, spec.pullOver.to + .5f) : (0f, 0f);
             street = StreetFor(scene.name);
             LoadAssets();
 
@@ -279,14 +281,15 @@ namespace BCRoot.EditorTools
                     {
                         if (IsReserved(side, z, z + LotLength)) continue;
                         var along = z + LotLength * .5f;
-                        for (var n = BackyardTrees + (float)rng.NextDouble() - .5f; n >= 1f; n--)
+                        var extension = InExtension(along); // run-in / run-out: half the trees, nothing across the lane
+                        for (var n = BackyardTrees * (extension ? .5f : 1f) + (float)rng.NextDouble() - .5f; n >= 1f; n--)
                             Tree(new Vector3(side * (frontLine + LotDepth * .72f + Jitter(5f)), 0f, along + Jitter(4f)), RandomTree());
-                        if (rng.NextDouble() < .5) // the next street's back yards, across the lane
+                        if (!extension && rng.NextDouble() < .5) // the next street's back yards, across the lane
                             Tree(new Vector3(side * (rearLine + LaneWidth + 3f + (float)rng.NextDouble() * 3f), 0f, along + Jitter(4f)), RandomTree());
                         House(side, along, rearLine + LaneWidth + 6f + Jitter(1f), faceAlongX: true, faceAway: true);
                     }
                     for (var z = from; z + 3.3f <= to; z += 3.4f)
-                        if (!IsReserved(side, z, z + 3.4f))
+                        if (!IsReserved(side, z, z + 3.4f) && !InExtension(z))
                             Yard("Suburban/fence", new Vector3(side * rearLine, 0f, z + 1.7f), 90f); // rear fences along the lane
                 }
             }
@@ -301,7 +304,7 @@ namespace BCRoot.EditorTools
 
         const float WideSidewalk = 3.5f, CommercialStrip = CurbWidth + WideSidewalk;
         const float CommercialTreeSpacing = 10f, CommercialLightSpacing = 25f;
-        static readonly (float from, float to) PullOver = (70f, 136f); // ambulance: kept free of sidewalk furniture
+        static (float from, float to) pullOver; // scenario_spec.json pullOver (ambulance): no sidewalk furniture there
 
         sealed class CityPiece { public Mesh mesh; public Material[] materials; public Quaternion rotation; public Vector3 scale; }
         static Dictionary<string, CityPiece> cityPieces;
@@ -322,9 +325,8 @@ namespace BCRoot.EditorTools
                         StreetTree(new Vector3(side * (roadHalf + 1.3f), 0f, z + Jitter(1f)));
                     for (var z = from + 9f; z < to - 2f; z += CommercialLightSpacing)
                         Light(new Vector3(side * (roadHalf + CurbWidth + .4f), 0f, z), side > 0 ? 90f : -90f);
-                    if (street == "commercial" && SceneName() == "Ambulance")
-                        for (var z = from + 6f; z < to - 3f; z += 12f)
-                            if (rng.NextDouble() < .35 && (z < PullOver.from || z > PullOver.to))
+                    for (var z = from + 6f; z < to - 3f; z += 12f) // café parasols, never where cars pull over
+                        if (rng.NextDouble() < .35 && (z < pullOver.from || z > pullOver.to))
                                 CityDetail(rng.NextDouble() < .5 ? "detail-parasol-a" : "detail-parasol-b",
                                     new Vector3(side * (roadHalf + CurbWidth + 2.6f), CurbHeight, z), 0f);
                     BuildingRow(side, front, from, to, "front");
@@ -332,7 +334,7 @@ namespace BCRoot.EditorTools
                 foreach (var (from, to) in MainRoadSpans(30f, 30f))
                     BuildingRow(side, front + 16f, from, to, "tall");
                 for (var z = zStart + 10f; z < zEnd; z += 24f)
-                    CityBuilding(LowDetail(), side, z + Jitter(6f), 48f + (float)rng.NextDouble() * 18f, faceAway: false, allowAnyWidth: true);
+                    CityBuilding(LowDetail(), side, z + Jitter(6f), 48f + (float)rng.NextDouble() * 18f, faceAway: false);
             }
         }
 
@@ -386,7 +388,7 @@ namespace BCRoot.EditorTools
         }
 
         // One city building facing a street; returns its width along that street (0 if dropped).
-        static float CityBuilding(string piece, int side, float along, float near, bool faceAway, bool alongX = false, float crossEdge = 0f, bool allowAnyWidth = false)
+        static float CityBuilding(string piece, int side, float along, float near, bool faceAway, bool alongX = false, float crossEdge = 0f)
         {
             var go = MakeCityPiece(piece, groupHouses);
             float yaw = alongX ? (side < 0 ? 180f : 0f) : (side < 0 ? -90f : 90f);
@@ -475,8 +477,6 @@ namespace BCRoot.EditorTools
             }
         }
 
-        static string SceneName() => root.gameObject.scene.name;
-
         // ---------- rural: edge of town (80 km/h) ----------
         // Gravel shoulders, grass verges, farm fences, a few houses set well back with gravel driveways and trees
         // around them, a forest edge further out, and a power line along one side. No curbs, sidewalks or lights.
@@ -490,13 +490,14 @@ namespace BCRoot.EditorTools
             {
                 foreach (var (from, to) in MainRoadSpans(0f))
                     StripAlongZ(side, roadHalf, Shoulder, .02f, from, to, gravel, "Gravel shoulder");
-                if (side < 0) PowerLine(-(roadHalf + Shoulder + 2.5f));
 
                 foreach (var (from, to) in MainRoadSpans(0f))
                 {
-                    // Farm fence, with gaps at driveways.
+                    // Farm fence, with gaps at driveways. Driveways keep poles and trees off them (keep-out).
                     var drives = new List<float>();
                     for (var z = from + 20f + (side > 0 ? 40f : 0f); z < to - 15f; z += FarmSpacing + Jitter(20f)) drives.Add(z);
+                    foreach (var d in drives)
+                        keepOut.Add(new Bounds(new Vector3(side * (roadHalf + 25f), 0f, d), new Vector3(50f, 0f, 4f)));
                     for (var z = from; z + 3.4f <= to; z += 3.4f)
                     {
                         var nearDrive = false;
@@ -517,6 +518,7 @@ namespace BCRoot.EditorTools
                     for (var z = from + 8f; z < to; z += 30f)
                         if (rng.NextDouble() < .5) Tree(new Vector3(side * (15f + (float)rng.NextDouble() * 20f), 0f, z + Jitter(8f)), "tree-large");
                 }
+                if (side < 0) PowerLine(-(roadHalf + Shoulder + 2.5f)); // after the driveways, so poles avoid them
             }
         }
 
@@ -532,13 +534,30 @@ namespace BCRoot.EditorTools
 
         static Reserved reserved;
 
-        static Reserved ReservedFor(string scene) => scene switch
+        // From scenario_spec.json: a playground scenario's no-scenery side becomes a park, any other no-scenery side
+        // school grounds. The play-area fence stands in the planted strip, so the park edge has no sidewalk along the
+        // play area (a sidewalk would be inside the fence).
+        static Reserved ReservedFor(PortSpec.ScenarioSpec spec)
         {
-            "SchoolZone" => new Reserved { side = 1, from = 48f, to = 138f, kind = "school" },
-            // The play-area fence stands in the planted strip, so the park edge has no sidewalk (a sidewalk would be inside the fence).
-            "Playground" => new Reserved { side = -1, from = 40f, to = 125f, kind = "park", noSidewalk = (60f, 110f) },
-            _ => null
-        };
+            if (spec == null) return null;
+            var left = spec.noSceneryLeft != null && spec.noSceneryLeft.to > 0f;
+            var right = spec.noSceneryRight != null && spec.noSceneryRight.to > 0f;
+            if (!left && !right) return null;
+            var range = left ? spec.noSceneryLeft : spec.noSceneryRight;
+            var park = spec.playground != null && spec.playground.to > 0f;
+            return new Reserved
+            {
+                side = left ? -1 : 1, from = range.from, to = range.to, kind = park ? "park" : "school",
+                noSidewalk = park ? (spec.playground.from - 2f, spec.playground.to + 2f) : default
+            };
+        }
+
+        static PortSpec.ScenarioSpec SpecFor(string scene)
+        {
+            foreach (var s in PortSpec.Current.scenarios)
+                if (s.unityEnum == scene) return s;
+            return null;
+        }
 
         static bool IsReserved(int side, float from, float to) =>
             reserved != null && side == reserved.side && to > reserved.from && from < reserved.to;
@@ -648,6 +667,7 @@ namespace BCRoot.EditorTools
         {
             var setback = MinSetback + (float)rng.NextDouble() * (MaxSetback - MinSetback);
             if (!House(side, along, frontLine + setback, faceAlongX: true)) return;
+            if (InExtension(along)) return; // run-in / run-out: houses only, no yard details
             for (var x = frontLine + 1.4f; x < frontLine + setback; x += 2.8f)
                 Yard("Suburban/path-long", new Vector3(side * x, 0f, along), 90f);
             if (rng.NextDouble() < HedgeChance)
@@ -656,6 +676,10 @@ namespace BCRoot.EditorTools
             if (rng.NextDouble() < FrontYardTreeChance) // off to one side of the path, in front of the house
                 Tree(new Vector3(side * (frontLine + setback * .5f), 0f, along + (rng.NextDouble() < .5 ? -3.6f : 3.6f)), RandomTree());
         }
+
+        // The run-in and run-out are mostly hidden in sessions (only the first scene's run-in and the last scene's
+        // run-out show), so they get houses and trees but not the small yard pieces.
+        static bool InExtension(float z) => z < 0f || z > mainEnd;
 
         static string RandomTree() => rng.NextDouble() < .65 ? "tree-large" : "tree-small";
 

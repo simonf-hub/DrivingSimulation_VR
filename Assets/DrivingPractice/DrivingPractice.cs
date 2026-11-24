@@ -99,7 +99,9 @@ namespace BCRoot
             playerCarBounds = CarBoundsRelativeTo(vehicle);
             // Eye a little forward and up from the scene's seat: more road over the dashboard and less roof.
             // Before the mirrors, which aim at the eye. In a headset the tracked head moves relative to this seat.
-            driverView.parent.position += vehicle.TransformDirection(SeatShift);
+            var seat = driverView.parent;
+            if (seat && seat != vehicle) seat.position += vehicle.TransformDirection(SeatShift);
+            else Debug.LogWarning("Driver view has no seat object of its own; eye position left as authored.", this);
             CreateMirror();
             CreateSideMirrors();
             ApplyLook(); // DrivingPractice.Sky.cs; before the mountains read the fog colour
@@ -173,6 +175,7 @@ namespace BCRoot
             changeRate = previous.changeRate;
             mobileControls = previous.mobileControls;
             coach = previous.coach;
+            nodLines = coach.LinesStarted; // this scene's beaver nods only for lines from now on
             coach.Attach(voice, prompt);
             leftHeld = previous.leftHeld;
             rightHeld = previous.rightHeld;

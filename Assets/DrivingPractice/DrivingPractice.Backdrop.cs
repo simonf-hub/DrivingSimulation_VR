@@ -189,8 +189,13 @@ namespace BCRoot
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetBackdrop()
         {
+            // Rebuilt on the next Play (picks up fog colour changes). With domain reload off the old ones are
+            // still alive here, so free them rather than leak a set per Play session.
+            if (backdropMesh) Object.DestroyImmediate(backdropMesh);
+            if (cloudMesh) Object.DestroyImmediate(cloudMesh);
+            if (backdropMaterial) Object.DestroyImmediate(backdropMaterial);
             backdrop = clouds = null;
-            backdropMesh = cloudMesh = null; // rebuilt on the next Play (picks up fog colour changes)
+            backdropMesh = cloudMesh = null;
             backdropMaterial = null;
         }
     }

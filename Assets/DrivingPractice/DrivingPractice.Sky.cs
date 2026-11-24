@@ -33,6 +33,7 @@ namespace BCRoot
                 skyMaterial.SetColor("_SunColor", SunColor);
                 skyMaterial.SetVector("_SunDirection", toSun);
                 RenderSettings.skybox = skyMaterial;
+                DynamicGI.UpdateEnvironment(); // reflections follow the new sky, not the scene's old procedural one
             }
 
             RenderSettings.ambientMode = AmbientMode.Trilight;
@@ -54,6 +55,10 @@ namespace BCRoot
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetSky() => skyMaterial = null;
+        static void ResetSky()
+        {
+            if (skyMaterial) Object.DestroyImmediate(skyMaterial); // domain reload off: free last Play's copy
+            skyMaterial = null;
+        }
     }
 }
