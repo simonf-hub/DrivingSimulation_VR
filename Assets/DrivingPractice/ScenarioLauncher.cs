@@ -12,6 +12,7 @@ namespace BCRoot
         static string launcherScene;
         static DrivingPractice stagedScenario;
         static Scene previousScene;
+        static float nextStart; // world z where the next scenario begins: the current one's end
 
         internal static int CompletedCount { get; private set; }
         internal static int ScenarioCount => session.Count;
@@ -23,6 +24,7 @@ namespace BCRoot
             SceneManager.sceneLoaded -= StageLoadedScenario;
             stagedScenario = null;
             previousScene = default;
+            nextStart = 0f;
             session.Clear();
             CompletedCount = 0;
             launcherScene = null;
@@ -69,6 +71,7 @@ namespace BCRoot
         internal static void PreloadFollowing(DrivingPractice current)
         {
             if (!HasFollowingScenario(current.gameObject.scene.path)) return;
+            nextStart = current.WorldEnd;
             SceneManager.sceneLoaded += StageLoadedScenario;
             SceneManager.LoadSceneAsync(session[CompletedCount + 1], LoadSceneMode.Additive);
         }
@@ -82,7 +85,7 @@ namespace BCRoot
             foreach (var root in scene.GetRootGameObjects())
             {
                 if (!root.TryGetComponent<DrivingPractice>(out var next)) continue;
-                next.StageForSession((CompletedCount + 1) * DrivingPractice.SectionLength);
+                next.StageForSession(nextStart);
                 stagedScenario = next;
                 return;
             }

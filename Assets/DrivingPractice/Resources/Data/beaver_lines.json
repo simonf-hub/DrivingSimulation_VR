@@ -1,0 +1,406 @@
+{
+  "lines": [
+    {
+      "id": "tut_1",
+      "kind": "cue",
+      "caption": "Tap Slower once",
+      "text": "Let's practise first. Tap Slower once."
+    },
+    {
+      "id": "tut_2",
+      "kind": "cue",
+      "caption": "Slower again to stop",
+      "text": "Good, we slowed to 30. Now tap Slower again to stop."
+    },
+    {
+      "id": "tut_3",
+      "kind": "cue",
+      "caption": "Tap Faster",
+      "text": "We stopped. Now tap Faster to drive at 30."
+    },
+    {
+      "id": "tut_4",
+      "kind": "cue",
+      "caption": "Faster again to 50",
+      "text": "Tap Faster again to go back to 50."
+    },
+    {
+      "id": "tut_5",
+      "kind": "praise",
+      "caption": "You're ready!",
+      "text": "Great, you're ready!"
+    },
+    {
+      "id": "tut_too_fast",
+      "kind": "tip",
+      "caption": "Wait, then tap",
+      "text": "Let's wait until the speed stops changing, then tap again."
+    },
+    {
+      "id": "tut_limit",
+      "kind": "tip",
+      "caption": "Back to 50",
+      "text": "The limit here is 50. Let's tap Slower once to go back to 50."
+    },
+    {
+      "id": "start_practice",
+      "kind": "info",
+      "caption": "Let's go",
+      "text": "Here we go!"
+    },
+    {
+      "id": "start_retry",
+      "kind": "info",
+      "caption": "Let's try again",
+      "text": "Let's give it another go! Watch the road and the signs, and look both ways at stops."
+    },
+    {
+      "id": "start_final",
+      "kind": "info",
+      "caption": "No hints this time",
+      "text": "This is the final drive. I'll stay quiet this time. Remember what we practised. You can do it."
+    },
+    {
+      "id": "next_scenario",
+      "kind": "info",
+      "caption": "Next one coming up",
+      "text": "Nicely done. Relax. The next situation is coming up."
+    },
+    {
+      "id": "nudge_go",
+      "kind": "tip",
+      "caption": "Go when it's clear",
+      "text": "When the way is clear, tap Faster to get going."
+    },
+    {
+      "id": "practice_pass",
+      "kind": "praise",
+      "caption": "You passed!",
+      "text": "That's it, well done! You can try it again or pick another one."
+    },
+    {
+      "id": "final_cleared",
+      "kind": "praise",
+      "caption": "You passed the test!",
+      "text": "You made it through all 5! Safe driving, great job."
+    },
+    {
+      "id": "time_up",
+      "kind": "info",
+      "caption": "Time's up",
+      "text": "Time's up for this drive. Thanks for practising with me!"
+    },
+    {
+      "id": "tilt_fallback",
+      "kind": "info",
+      "caption": "Swipe to look",
+      "text": "Turning the phone isn't working here, so swipe the screen to look around instead."
+    },
+    {
+      "id": "speeding",
+      "kind": "fail",
+      "caption": "Too fast here",
+      "text": "We went over the speed limit. Next time, watch for the MAXIMUM sign and tap Slower a little sooner."
+    },
+    {
+      "id": "rear_ended",
+      "kind": "fail",
+      "caption": "The car behind bumped us",
+      "text": "The car behind hit us after we tapped Slower again while still slowing down. Next time, let's tap once, wait until the speed stops changing, then tap again."
+    },
+    {
+      "id": "stop_cue",
+      "kind": "cue",
+      "caption": "Stop sign ahead",
+      "text": "Stop sign ahead. Stop at the white line."
+    },
+    {
+      "id": "fr_cue",
+      "kind": "cue",
+      "caption": "Flashing red ahead",
+      "text": "Flashing red light. Stop at the white line."
+    },
+    {
+      "id": "stop_look",
+      "kind": "cue",
+      "caption": "Look left, right, left",
+      "text": "Good stop. Look left, right, then left again. Go when clear."
+    },
+    {
+      "id": "stop_early",
+      "kind": "cue",
+      "caption": "Look left, right, left",
+      "text": "Good stop. We're a little early. Look left, right, then left again. Go when clear."
+    },
+    {
+      "id": "stop_toofar",
+      "kind": "tip",
+      "caption": "Move up to the line",
+      "text": "Let's move a little closer. Tap Faster, then stop at the white line."
+    },
+    {
+      "id": "stop_done",
+      "kind": "praise",
+      "caption": "Stop, look, go",
+      "text": "Well done: stop, look both ways, go."
+    },
+    {
+      "id": "fr_done",
+      "kind": "praise",
+      "caption": "Stop, look, go",
+      "text": "Well done. Flashing red: stop, look, go."
+    },
+    {
+      "id": "stop_tip",
+      "kind": "tip",
+      "caption": "Look both ways",
+      "text": "Tip: always look both ways before you go."
+    },
+    {
+      "id": "stop_fail_rolled",
+      "kind": "fail",
+      "caption": "Stop fully at the line",
+      "text": "At a stop sign, let's stop completely at the white line, then check both ways."
+    },
+    {
+      "id": "fr_fail_rolled",
+      "kind": "fail",
+      "caption": "Stop fully at the line",
+      "text": "A flashing red light means a full stop at the line. Then we can go when it's clear."
+    },
+    {
+      "id": "stop_fail_traffic",
+      "kind": "fail",
+      "caption": "Car from the {side}",
+      "text": "A car from the {side} was only {m} metres away. Look left and right, and wait until both sides are clear."
+    },
+    {
+      "id": "stop_fail_hit",
+      "kind": "fail",
+      "caption": "We hit a crossing car",
+      "text": "We hit a crossing car. Next time, let's look both ways and wait until both sides are clear."
+    },
+    {
+      "id": "ped_cue",
+      "kind": "cue",
+      "caption": "Truck ahead: slow down",
+      "text": "Parked truck ahead. Someone could be behind it. Tap Slower."
+    },
+    {
+      "id": "ped_out",
+      "kind": "alert",
+      "caption": "Someone stepping out!",
+      "text": "Someone is stepping out!"
+    },
+    {
+      "id": "ped_dog",
+      "kind": "alert",
+      "caption": "Dog in the road!",
+      "text": "A dog is running into the road!"
+    },
+    {
+      "id": "ped_clear",
+      "kind": "go",
+      "caption": "All clear: Faster",
+      "text": "They are across. Tap Faster."
+    },
+    {
+      "id": "ped_dog_clear",
+      "kind": "go",
+      "caption": "All clear: Faster",
+      "text": "The dog is across. Tap Faster."
+    },
+    {
+      "id": "ped_done",
+      "kind": "praise",
+      "caption": "Slow near parked trucks",
+      "text": "Nice. Slow down beside parked trucks."
+    },
+    {
+      "id": "ped_fail_hit",
+      "kind": "fail",
+      "caption": "Slow down near trucks",
+      "text": "They were in our path. Slowing down near parked trucks gives us time to stop."
+    },
+    {
+      "id": "ped_fail_late",
+      "kind": "fail",
+      "caption": "Stop when they step out",
+      "text": "We slowed down, good. When someone steps out, tap Slower again right away to stop."
+    },
+    {
+      "id": "ped_fail_dog",
+      "kind": "fail",
+      "caption": "Slow down near trucks",
+      "text": "The dog was in our path. Slowing down near parked trucks gives us time to stop."
+    },
+    {
+      "id": "school_cue",
+      "kind": "cue",
+      "caption": "School zone: 30",
+      "text": "School zone ahead: school day, 8:30 a.m. Slow to 30 before the sign."
+    },
+    {
+      "id": "school_end",
+      "kind": "go",
+      "caption": "Back to 50",
+      "text": "School zone over. You can go 50 again."
+    },
+    {
+      "id": "school_done",
+      "kind": "praise",
+      "caption": "School zones: 30",
+      "text": "Great. School zones: 30 on school days."
+    },
+    {
+      "id": "school_fail_speed",
+      "kind": "fail",
+      "caption": "30 in school zones",
+      "text": "In a school zone the limit is 30 km/h on school days, 8 a.m. to 5 p.m. Let's stay at 30 until the 50 sign."
+    },
+    {
+      "id": "pg_cue",
+      "kind": "cue",
+      "caption": "Playground zone: 30",
+      "text": "Playground zone ahead. Slow to 30 before the sign."
+    },
+    {
+      "id": "pg_ball",
+      "kind": "alert",
+      "caption": "Ball! Child may follow",
+      "text": "Ball in the road! A child may follow."
+    },
+    {
+      "id": "pg_clear",
+      "kind": "go",
+      "caption": "Child safe: Faster once",
+      "text": "The child is safe. Tap Faster once. Still 30 here."
+    },
+    {
+      "id": "pg_done",
+      "kind": "praise",
+      "caption": "Ball means child nearby",
+      "text": "Good. A ball often means a child is near."
+    },
+    {
+      "id": "pg_fail_child",
+      "kind": "fail",
+      "caption": "Stop and wait",
+      "text": "A child ran after the ball. Let's stop and wait until they're off the road."
+    },
+    {
+      "id": "pg_fail_speed",
+      "kind": "fail",
+      "caption": "30 in playground zones",
+      "text": "Playground zones are 30 km/h from dawn to dusk, every day. Let's stay at 30 until the 50 sign."
+    },
+    {
+      "id": "lead_cue",
+      "kind": "cue",
+      "caption": "Up to 80: watch ahead",
+      "text": "Bigger road: up to 80. Watch the car ahead."
+    },
+    {
+      "id": "lead_brake",
+      "kind": "alert",
+      "caption": "Brake lights: Slower",
+      "text": "Brake lights ahead! Tap Slower."
+    },
+    {
+      "id": "lead_done_slow",
+      "kind": "praise",
+      "caption": "Safe, but try 80",
+      "text": "We stayed slow, which is safe. Next time, speed up to 80 and stay 2 seconds behind."
+    },
+    {
+      "id": "lead_done",
+      "kind": "praise",
+      "caption": "Keep a 2-second gap",
+      "text": "Good distance. Stay 2 seconds behind (3 on highways)."
+    },
+    {
+      "id": "lead_fail_hit",
+      "kind": "fail",
+      "caption": "Slow down sooner",
+      "text": "We hit the car ahead. Next time, tap Slower as soon as the brake lights come on."
+    },
+    {
+      "id": "lead_fail_close",
+      "kind": "fail",
+      "caption": "Too close",
+      "text": "Let's leave more room for the car ahead. Keep at least 2 seconds behind it (3 seconds on highways)."
+    },
+    {
+      "id": "amb_cue",
+      "kind": "alert",
+      "caption": "Siren! Look behind",
+      "text": "Ambulance behind us! We move right. Tap Slower and stop."
+    },
+    {
+      "id": "amb_passed",
+      "kind": "go",
+      "caption": "It's passed: Faster",
+      "text": "It has passed. When clear, tap Faster."
+    },
+    {
+      "id": "amb_done",
+      "kind": "praise",
+      "caption": "Pull right and stop",
+      "text": "Well done. Lights or siren: pull right and stop."
+    },
+    {
+      "id": "amb_fail_moved",
+      "kind": "fail",
+      "caption": "Wait until it passes",
+      "text": "Let's wait until the ambulance has completely passed before moving again."
+    },
+    {
+      "id": "amb_fail_nopull",
+      "kind": "fail",
+      "caption": "Pull right and stop",
+      "text": "For an ambulance with lights or a siren, pull right and stop when it is safe. Let it pass."
+    },
+    {
+      "id": "amb_fail_blocked",
+      "kind": "fail",
+      "caption": "We were in its way",
+      "text": "Let's give the ambulance a clear path. Pull over to the right and stop."
+    },
+    {
+      "id": "amb_fail_notstopped",
+      "kind": "fail",
+      "caption": "Stop until it passes",
+      "text": "Let's pull over and stay stopped until the ambulance has gone by."
+    },
+    {
+      "id": "bus_cue",
+      "kind": "cue",
+      "caption": "School bus slowing",
+      "text": "School bus ahead with amber lights. It will stop. Tap Slower."
+    },
+    {
+      "id": "bus_red",
+      "kind": "alert",
+      "caption": "Red lights: stop",
+      "text": "Red lights and STOP arm! Stop and wait."
+    },
+    {
+      "id": "bus_clear",
+      "kind": "go",
+      "caption": "Lights off: Faster",
+      "text": "Lights off, child safe. Tap Faster."
+    },
+    {
+      "id": "bus_done",
+      "kind": "praise",
+      "caption": "Red lights: all stop",
+      "text": "Red lights on a bus: all cars stop, both ways."
+    },
+    {
+      "id": "bus_fail",
+      "kind": "fail",
+      "caption": "Stop for red lights",
+      "text": "When a school bus has flashing red lights, let's stop and wait. This applies to traffic in both directions."
+    }
+  ]
+}
