@@ -15,6 +15,7 @@ namespace BCRoot
 
         const float Lane = 1.85f;
         const float Nose = 2.66f; // front bumper, metres ahead of the player car's origin
+        const float LeadInSeconds = 5f;
         static readonly Vector3 SeatShift = new(0f, .02f, .10f); // car-local metres: eye now at about (-0.41, 1.21, 0.47)
         static int[] Speeds => PortSpec.Current.engine.gearsKmh;
 
@@ -50,7 +51,7 @@ namespace BCRoot
         readonly List<Light> stagedLights = new();
         Vector3 seatedHead;
         Quaternion seatedHeading;
-        float yaw, pitch, tiltReference;
+        float yaw, pitch, tiltReference, tiltPitchReference;
         bool usingHeadset, usingTilt;
         MobileDrivingControls mobileControls = new();
 
@@ -183,6 +184,7 @@ namespace BCRoot
             pitch = previous.pitch;
             usingTilt = previous.usingTilt;
             tiltReference = previous.tiltReference;
+            tiltPitchReference = previous.tiltPitchReference;
             seatedHead = previous.seatedHead;
             seatedHeading = previous.seatedHeading;
             usingHeadset = previous.usingHeadset;
@@ -227,7 +229,6 @@ namespace BCRoot
             var dismissTap = coach.ReadDismissInput(MobileDrivingControls.CcArea(Screen.safeArea));
             UpdateView(touch.LookDelta, touch.AheadTap || keyboard?.upArrowKey.wasPressedThisFrame == true);
             coach.TiltActive = usingTilt;
-            UpdateMirrorAlert();
             UpdateSideMirrors();
             coach.Tick(Time.unscaledDeltaTime);
             UpdateHud(); // also while a card is up or the result shows, so the HUD is never blank
@@ -365,9 +366,12 @@ namespace BCRoot
             resultLine = null;
             finished = false;
             completedSessionScenario = false;
-            distance = 0;
-            vehicle.position = new Vector3(Lane, 0f, worldStart);
             speed = 50f;
+            // About 5 s of plain driving before the scenario starts, on the run-in street. Only where the run-in is
+            // shown (worldStart 0: a scene on its own or the first of a session); a chained scene starts at 0.
+            // shortcut: a fixed lead-in until the final test's calm-road gaps (step 6) take this over.
+            distance = worldStart == 0f ? -speed / 3.6f * LeadInSeconds : 0f;
+            vehicle.position = new Vector3(Lane, 0f, worldStart + distance);
             ResetSection();
             coach.Reset();
             coach.Say(startedOnce ? "start_retry" : "start_practice");
@@ -391,7 +395,7 @@ namespace BCRoot
             if (section.StopArm) section.StopArm.SetActive(false);
             if (section.BrakeLights) section.BrakeLights.SetActive(false);
             stoppedFor = roadOverTime = nudgeTimer = zoneOverTime = 0f;
-            scenarioHold = MirrorAlert = false;
+            scenarioHold = false;
             carX = carXTarget = Lane;
             switch (section.Kind)
             {
@@ -445,40 +449,70 @@ namespace BCRoot
             var degreesPerPixel = lookSpec.swipeGain / focal * Mathf.Rad2Deg;
             var mouse = Mouse.current;
             var look = touchDelta * degreesPerPixel;
-            if (!MobileDrivingControls.UsesTouch && mouse?.rightButton.isPressed == true)
+            if (mobileControls.MouseAllowed && mouse?.rightButton.isPressed == true)
                 look = mouse.delta.ReadValue() * degreesPerPixel;
 
-            if (TryTiltHeading(out var heading))
+            // Phone held up like a window into the car ("magic mirror"): turning and tilting it moves the view,
+            // relative to how it was held at the start or at the last Ahead tap. Otherwise swipe / drag.
+            if (TryTilt(out var heading, out var pitchUp))
             {
-                if (!usingTilt || recentre) tiltReference = heading;
+                if (!usingTilt || recentre)
+                {
+                    tiltReference = heading;
+                    tiltPitchReference = pitchUp;
+                }
+                // Light smoothing (about 60 ms): sensor readings arrive in steps and shake with the hand.
+                var follow = recentre || !usingTilt ? 1f : 1f - Mathf.Exp(-Time.unscaledDeltaTime * 16f);
                 usingTilt = true;
-                yaw = Mathf.DeltaAngle(tiltReference, heading);
+                yaw = Mathf.LerpAngle(yaw, Mathf.DeltaAngle(tiltReference, heading), follow);
+                pitch = Mathf.LerpAngle(pitch, tiltPitchReference - pitchUp, follow); // Unity pitch: positive looks down
             }
             else
             {
                 usingTilt = false;
                 yaw = recentre ? 0f : yaw + look.x;
+                pitch = recentre ? 0f : pitch - look.y;
             }
-            if (recentre) pitch = 0f;
             yaw = Mathf.Clamp(yaw, -maxYaw, maxYaw);
-            pitch = Mathf.Clamp(pitch - look.y, -40f, 40f);
+            pitch = Mathf.Clamp(pitch, -40f, 40f);
             driverView.localPosition = Vector3.zero;
             driverView.localRotation = Quaternion.Euler(pitch, yaw, 0f);
         }
 
         // Phone tilt: compass heading (degrees, right = positive) of the direction the phone's back faces.
         // shortcut: assumes the sensor's world frame is z-up (Android/iOS raw); if turning right looks left on a device, flip the sign here.
-        static bool TryTiltHeading(out float heading)
+#if UNITY_WEBGL && !UNITY_EDITOR
+        [System.Runtime.InteropServices.DllImport("__Internal")] static extern void DeviceTiltStart();
+        [System.Runtime.InteropServices.DllImport("__Internal")] static extern int DeviceTiltHasData();
+        [System.Runtime.InteropServices.DllImport("__Internal")] static extern float DeviceTiltHeading();
+        [System.Runtime.InteropServices.DllImport("__Internal")] static extern float DeviceTiltPitch();
+        static bool tiltStarted;
+
+        // Web build: Plugins/WebGL/DeviceTilt.jslib. Heading: the phone's turning, integrated from the gyroscope
+        // (degrees, clockwise = right; drifts a little, Ahead re-centres). Pitch: from gravity, degrees up.
+        static bool TryTilt(out float heading, out float pitchUp)
         {
-            heading = 0f;
+            heading = pitchUp = 0f;
+            if (!tiltStarted) { tiltStarted = true; DeviceTiltStart(); }
+            if (DeviceTiltHasData() == 0) return false; // desktop, no permission yet, or plain HTTP: swipe instead
+            heading = DeviceTiltHeading();
+            pitchUp = DeviceTiltPitch();
+            return true;
+        }
+#else
+        static bool TryTilt(out float heading, out float pitchUp)
+        {
+            heading = pitchUp = 0f;
             if (!Application.isMobilePlatform || AttitudeSensor.current is not { } sensor) return false;
             if (!sensor.enabled) InputSystem.EnableDevice(sensor);
             var attitude = sensor.attitude.ReadValue();
             if (attitude.x == 0f && attitude.y == 0f && attitude.z == 0f) return false; // no reading yet: swipe instead
             var back = attitude * Vector3.back;
             heading = Mathf.Atan2(back.x, back.y) * Mathf.Rad2Deg;
+            pitchUp = Mathf.Asin(Mathf.Clamp(back.z, -1f, 1f)) * Mathf.Rad2Deg;
             return true;
         }
+#endif
 
         // Stopped a while with nothing coming and the beaver quiet: "When the way is clear, tap Faster".
         void NudgeWhenWaiting(float dt)

@@ -7,7 +7,7 @@ namespace BCRoot
     // Interior rear-view mirror: a rounded mirror fixed at the top centre of the windshield, inside the player's car.
     // A rear-facing camera renders into it, flipped like a real mirror. Because it is a 3D object in the car, it stays put
     // when the driver looks around, and it also shows in an XR headset.
-    // In practice, a scenario can set MirrorAlert to flash the frame and show "LOOK BEHIND" (the prototype does this for the ambulance).
+    // The prototype's flashing "LOOK BEHIND" frame (ambulance, practice) was dropped as unrealistic; the beaver's voice is the cue.
     public sealed partial class DrivingPractice
     {
         const int MirrorTextureWidth = 512, MirrorTextureHeight = 148;
@@ -16,7 +16,9 @@ namespace BCRoot
         // Top centre of the windshield, just under the roof's front edge (player sedan model, car-local metres).
         // The mirror hangs just behind its mount (driver side), so the arm runs up and forward from the mirror's back to the glass.
         // Height is halfway between the earlier spot (1.23) and the headliner's front edge (about 1.38).
-        static readonly Vector3 MirrorSpot = new(0f, 1.305f, .85f);
+        // 5 cm back from the windshield (z .85 -> .80), so the windshield pad never pokes through the glass from the
+        // driver's eye (it did once the eye moved forward, as a dark dome on the mirror).
+        static readonly Vector3 MirrorSpot = new(0f, 1.29f, .80f);
         // Where the mount sticks to the windshield, and the glass's inward normal (sloped windshield of the sedan model:
         // bottom edge at y 1.03 / z 1.39, top edge at y 1.40 / z 0.73).
         // Must stay further forward than the mirror's back, or the arm shows in front of the glass.
@@ -26,10 +28,7 @@ namespace BCRoot
         Camera mirrorCamera;
         RenderTexture mirrorTexture;
         Transform mirrorBody;
-        Material mirrorFrame;
-        TextMesh mirrorAlertText;
         readonly List<Mesh> mirrorMeshes = new();
-        internal bool MirrorAlert;
 
         void CreateMirror()
         {
@@ -41,19 +40,9 @@ namespace BCRoot
             mirrorBody.SetParent(vehicle, false);
             mirrorBody.SetPositionAndRotation(spot, Quaternion.LookRotation(spot - driverView.position, vehicle.up));
 
-            var glass = Surface(Color.black, true);
-            glass.SetTexture("_EmissionMap", mirrorTexture);
-            glass.SetColor("_EmissionColor", Color.white);
-            glass.SetFloat("_Smoothness", .25f); // glossier washes the image out with sky reflection
-            AddMirrorPart("Glass", RoundedRect(MirrorWidth, MirrorHeight, MirrorCorner, true), glass, 0f);
-            mirrorFrame = Surface(new Color(.06f, .06f, .06f));
-            AddMirrorPart("Frame", RoundedRect(MirrorWidth + MirrorRim * 2f, MirrorHeight + MirrorRim * 2f, MirrorCorner + MirrorRim, false), mirrorFrame, .006f);
-
-            // Glass: a thin glossy, see-through layer in front of the image, so it reads as a mirror and not a screen.
-            var sheen = Surface(new Color(.75f, .82f, .9f, .14f));
-            MakeTransparent(sheen);
-            sheen.SetFloat("_Smoothness", .97f);
-            AddMirrorPart("Glass sheen", RoundedRect(MirrorWidth, MirrorHeight, MirrorCorner, false), sheen, -.002f);
+            AddMirrorPart("Glass", RoundedRect(MirrorWidth, MirrorHeight, MirrorCorner, true), MirrorGlass(mirrorTexture), 0f);
+            AddMirrorPart("Frame", RoundedRect(MirrorWidth + MirrorRim * 2f, MirrorHeight + MirrorRim * 2f, MirrorCorner + MirrorRim, false),
+                Surface(new Color(.06f, .06f, .06f)), .006f);
 
             // Mount: a pad stuck to the windshield, and an arm down to the back of the mirror.
             var mountMaterial = Surface(new Color(.1f, .1f, .1f));
@@ -64,7 +53,7 @@ namespace BCRoot
             pad.rotation = Quaternion.FromToRotation(Vector3.up, inward);
             pad.localScale = new Vector3(.05f, .005f, .035f); // flat oval pad on the glass
             var armStart = pad.position + inward * .005f;
-            var armEnd = mirrorBody.TransformPoint(new Vector3(0f, MirrorHeight * .2f, .014f)); // upper back of the mirror
+            var armEnd = mirrorBody.TransformPoint(new Vector3(0f, MirrorHeight * .2f, .035f)); // behind the frame, out of sight
             var arm = MountPart(PrimitiveType.Cylinder, "Mount arm", mountMaterial);
             arm.position = (armStart + armEnd) * .5f;
             arm.rotation = Quaternion.FromToRotation(Vector3.up, armEnd - armStart);
@@ -72,22 +61,6 @@ namespace BCRoot
             var joint = MountPart(PrimitiveType.Sphere, "Mount joint", mountMaterial);
             joint.position = armEnd;
             joint.localScale = Vector3.one * .022f;
-
-            mirrorAlertText = new GameObject("Look behind").AddComponent<TextMesh>();
-            mirrorAlertText.transform.SetParent(mirrorBody, false);
-            mirrorAlertText.transform.localPosition = new Vector3(0f, -MirrorHeight * .5f - MirrorRim - .006f, 0f);
-            mirrorAlertText.text = "LOOK BEHIND";
-            mirrorAlertText.anchor = TextAnchor.UpperCenter;
-            mirrorAlertText.alignment = TextAlignment.Center;
-            mirrorAlertText.fontStyle = FontStyle.Bold;
-            mirrorAlertText.characterSize = .004f;
-            mirrorAlertText.fontSize = 48;
-            if (display)
-            {
-                mirrorAlertText.font = display.font;
-                mirrorAlertText.GetComponent<MeshRenderer>().sharedMaterial = display.GetComponent<MeshRenderer>().sharedMaterial;
-            }
-            mirrorAlertText.gameObject.SetActive(false);
 
             var holder = new GameObject("Rear-view mirror camera");
             holder.transform.SetParent(vehicle, false);
@@ -112,17 +85,13 @@ namespace BCRoot
             return part.transform;
         }
 
-        // URP Lit, switched to alpha-blended transparent.
-        static void MakeTransparent(Material material)
+        // The mirror image with a faint sheen (Resources/Shaders/MirrorGlass.shader). A keyword-free shader, because
+        // runtime URP Lit emission/transparent variants are stripped from player builds (blank grey mirrors on web).
+        Material MirrorGlass(Texture image)
         {
-            material.SetFloat("_Surface", 1f);
-            material.SetFloat("_Blend", 0f);
-            material.SetFloat("_ZWrite", 0f);
-            material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            material.SetOverrideTag("RenderType", "Transparent");
-            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            var material = new Material(Resources.Load<Shader>("Shaders/MirrorGlass")) { mainTexture = image };
+            materials.Add(material);
+            return material;
         }
 
         void AddMirrorPart(string name, Mesh mesh, Material material, float behind)
@@ -135,27 +104,13 @@ namespace BCRoot
             part.AddComponent<MeshRenderer>().sharedMaterial = material;
         }
 
-        // Frame flashes red and white with "LOOK BEHIND" while a scenario asks for it (practice only).
-        void UpdateMirrorAlert()
-        {
-            if (!mirrorFrame) return;
-            var alert = MirrorAlert && coach.Coaching && result == null;
-            var red = alert && Mathf.Repeat(Time.unscaledTime, .5f) < .25f;
-            var color = !alert ? new Color(.06f, .06f, .06f) : red ? new Color(1f, .12f, .12f) : Color.white;
-            mirrorFrame.color = color;
-            mirrorFrame.SetColor("_EmissionColor", alert ? color * .6f : Color.black);
-            if (alert) mirrorFrame.EnableKeyword("_EMISSION");
-            if (mirrorAlertText.gameObject.activeSelf != alert) mirrorAlertText.gameObject.SetActive(alert);
-            mirrorAlertText.color = red ? new Color(1f, .25f, .25f) : Color.white;
-        }
-
         // The mirror's lowest point on screen (GUI y), so pause cards can sit below it. 0 when it is not in view.
         float MirrorBottomOnScreen()
         {
             var view = driverView ? driverView.GetComponentInChildren<Camera>() : null;
             if (!view || !mirrorBody) return 0f;
             var bottom = 0f;
-            var half = new Vector2(MirrorWidth * .5f + MirrorRim, MirrorHeight * .5f + MirrorRim + (MirrorAlert ? .03f : 0f));
+            var half = new Vector2(MirrorWidth * .5f + MirrorRim, MirrorHeight * .5f + MirrorRim);
             foreach (var corner in new[] { new Vector3(-half.x, -half.y), new Vector3(half.x, -half.y) })
             {
                 var p = view.WorldToScreenPoint(mirrorBody.TransformPoint(corner));

@@ -5,14 +5,22 @@ using TouchPhase = UnityEngine.InputSystem.TouchPhase;
 namespace BCRoot
 {
     // Screen input for phones and the editor: taps on the two pedals (bottom right, side by side, so one thumb rocks
-    // between them like a foot on real pedals), the Ahead button (top right), and swipes anywhere else to look around.
+    // between them like a foot on real pedals), the Ahead button (top right), and swipes (or mouse drags) anywhere else
+    // to look around.
     // The pedals are drawn by DrivingPractice.Pedals.cs using the same rectangles.
     internal sealed class MobileDrivingControls
     {
         Touchscreen lastScreen;
         int[] activeTouchIds;
+        bool mouseLooking;
 
         internal static bool UsesTouch => Application.isMobilePlatform || Touchscreen.current != null;
+
+        // The mouse works whenever no finger touched the screen in the last moment. Not gated on UsesTouch: browsers
+        // on PCs can report a touchscreen (Unity web), which used to switch the mouse off. The delay ignores the
+        // mouse clicks a phone browser fakes after a tap, so a pedal tap never counts twice.
+        float lastTouchTime = float.NegativeInfinity;
+        internal bool MouseAllowed => Time.unscaledTime - lastTouchTime > .8f;
 
         // Rectangles in screen pixels (origin bottom left).
         internal (bool LeftTap, bool RightTap, bool AheadTap, Vector2 LookDelta) Read()
@@ -21,13 +29,23 @@ namespace BCRoot
             bool left = false, right = false, aheadTap = false;
             var lookDelta = Vector2.zero;
 
-            // Mouse (editor, desktop): a click on a pedal presses it.
-            if (!UsesTouch && Mouse.current is { } mouse && mouse.leftButton.wasPressedThisFrame)
+            if (Touchscreen.current is { } touchscreen)
+                foreach (var t in touchscreen.touches)
+                    if (t.isInProgress) lastTouchTime = Time.unscaledTime;
+
+            // Mouse (editor, desktop): a click on a pedal presses it; a drag that starts anywhere else looks around,
+            // like a swipe on a phone.
+            if (MouseAllowed && Mouse.current is { } mouse)
             {
-                var p = mouse.position.ReadValue();
-                left = slower.Contains(p);
-                right = faster.Contains(p);
-                aheadTap = ahead.Contains(p);
+                if (mouse.leftButton.wasPressedThisFrame)
+                {
+                    var p = mouse.position.ReadValue();
+                    left = slower.Contains(p);
+                    right = faster.Contains(p);
+                    aheadTap = ahead.Contains(p);
+                    mouseLooking = !left && !right && !aheadTap && !CcArea(Screen.safeArea).Contains(p);
+                }
+                else if (mouse.leftButton.isPressed && mouseLooking) lookDelta = mouse.delta.ReadValue();
             }
 
             if (Touchscreen.current is not { } screen) return (left, right, aheadTap, lookDelta);

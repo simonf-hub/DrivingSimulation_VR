@@ -12,7 +12,7 @@ namespace BCRoot
     {
         const int SideMirrorTextureWidth = 256, SideMirrorTextureHeight = 170;
         const float SideMirrorWidth = .15f, SideMirrorHeight = .10f, SideMirrorCorner = .025f, SideMirrorRim = .01f;
-        const float SideMirrorForward = .06f; // toward the driver from the model's glass
+        const float SideMirrorForward = .11f; // toward the driver from the model's glass, clear of the housing arm
         const float SideMirrorOutward = 10f, SideMirrorDown = 3f; // degrees
         const float DriverSideFov = 20f, PassengerSideFov = 27f;  // vertical
         // Centres of the model's mirror glass (player sedan model, car-local metres); left is the driver side.
@@ -29,9 +29,6 @@ namespace BCRoot
                     if (m && m.name.Contains("zerkalo")) r.enabled = false; // the model's plain grey glass
 
             var rim = Surface(new Color(.06f, .06f, .06f));
-            var sheen = Surface(new Color(.75f, .82f, .9f, .14f));
-            MakeTransparent(sheen);
-            sheen.SetFloat("_Smoothness", .97f);
             for (var side = 0; side < 2; side++)
             {
                 var left = side == 0;
@@ -39,18 +36,13 @@ namespace BCRoot
                 sideMirrorTextures[side] = texture;
 
                 // The mirror surface, facing the driver's eye. The model's housing sits on the driver's side of its glass,
-                // so the mirror goes 6 cm toward the driver, in front of the housing, with a dark rim of its own.
+                // so the mirror goes 11 cm toward the driver, in front of the housing, with a dark rim of its own.
                 var glassCentre = vehicle.TransformPoint(left ? LeftMirrorGlass : RightMirrorGlass);
                 var spot = glassCentre + (driverView.position - glassCentre).normalized * SideMirrorForward;
                 var body = new GameObject(left ? "Left side mirror" : "Right side mirror").transform;
                 body.SetParent(vehicle, false);
                 body.SetPositionAndRotation(spot, Quaternion.LookRotation(spot - driverView.position, vehicle.up));
-                var glass = Surface(Color.black, true);
-                glass.SetTexture("_EmissionMap", texture);
-                glass.SetColor("_EmissionColor", Color.white);
-                glass.SetFloat("_Smoothness", .25f);
-                SideMirrorPart(body, "Glass", RoundedRect(SideMirrorWidth, SideMirrorHeight, SideMirrorCorner, true), glass, 0f);
-                SideMirrorPart(body, "Glass sheen", RoundedRect(SideMirrorWidth, SideMirrorHeight, SideMirrorCorner, false), sheen, -.002f);
+                SideMirrorPart(body, "Glass", RoundedRect(SideMirrorWidth, SideMirrorHeight, SideMirrorCorner, true), MirrorGlass(texture), 0f);
                 SideMirrorPart(body, "Rim", RoundedRect(SideMirrorWidth + SideMirrorRim * 2f, SideMirrorHeight + SideMirrorRim * 2f,
                     SideMirrorCorner + SideMirrorRim, false), rim, .006f);
 

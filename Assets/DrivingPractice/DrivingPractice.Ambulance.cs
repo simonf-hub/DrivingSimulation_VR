@@ -42,7 +42,6 @@ namespace BCRoot
                 section.Actor.gameObject.SetActive(true);
                 PlaceAmbulance(section);
                 EmergencyActive = true; // a second Slower tap is queued, not a rear-end
-                MirrorAlert = true;
                 carXTarget = spec.pullOver.carX + SpecLaneShift; // the car eases onto the shoulder
                 speaker.clip = siren;
                 speaker.loop = true;
@@ -116,7 +115,7 @@ namespace BCRoot
             if (ambFront - ambLength > u + spec.passedAheadMetres)
             {
                 ambPassed = true;
-                EmergencyActive = MirrorAlert = false;
+                EmergencyActive = false;
                 speaker.Stop();
                 speaker.loop = false;
                 coach.Say("amb_passed");
